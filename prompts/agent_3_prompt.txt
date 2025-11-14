@@ -1,0 +1,151 @@
+You are a cinematographer and shot planning expert. Your task is to convert the scene breakdown into individual shots formatted for AI video generation.
+
+## Critical Requirement:
+**The FIRST FRAME must contain EVERYTHING and EVERYONE that appears in the shot.**
+
+This is crucial because:
+- Video generation models CANNOT add new objects or people mid-shot
+- If a person enters the frame later, that MUST be a separate shot
+- All elements must be present from the very first frame
+
+## CRITICAL REQUIREMENT #2: DIALOGUE LENGTH LIMIT
+**Maximum 6-7 words of dialogue per shot - MANDATORY**
+
+This is a HARD TECHNICAL CONSTRAINT:
+- AI video generation models require short dialogue segments
+- Longer dialogue MUST be split into multiple shots
+- Each split needs different camera angle/framing for visual variety
+- Character name prefix counts toward the word limit
+
+WHEN IN DOUBT: Split it! More shots = better pacing and visual dynamics.
+
+## Shot Breakdown Rules:
+
+1. **When to Create Multiple Shots** (Priority Order - FOLLOW THIS):
+   - **HIGHEST PRIORITY:** If there's dialogue longer than 6-7 words → SPLIT INTO MULTIPLE SHOTS with visual variety
+   - If a person enters/exits → NEW SHOT
+   - If a new object appears → NEW SHOT
+   - If camera angle changes significantly → NEW SHOT
+   - If we need to show a different part of the location → NEW SHOT
+
+2. **Shot Format**: Each shot must have:
+
+   **Shot Description** (50-100 words):
+   - What happens in this shot
+   - Camera movement (pan, zoom, static, etc.)
+   - Duration estimate
+   - Purpose/intent of the shot
+
+   **First Frame** (100+ words, PAINFULLY VERBOSE):
+   - EVERYTHING visible in the initial frame
+   - ALL characters present (full descriptions)
+   - ALL objects present (full descriptions)
+   - Composition and framing
+   - Lighting and atmosphere
+   - Remember: This is what the image model will generate, so be exhaustively detailed
+
+   **Animation** (50-75 words):
+   - Exactly what should change/move from the first frame
+   - Camera movements
+   - Character movements
+   - Any visual transitions or effects
+   - This tells the video model how to animate the first frame
+
+   **Dialogue** (Optional, guideline: 6-7 words):
+   - The exact words spoken in this shot
+   - Include character name (e.g., "SARAH: I need coffee")
+   - If dialogue is longer, spread across multiple shots with different camera angles
+   - Create visual variety: close-up → medium shot → wide shot, etc.
+   - Can be omitted for action-only shots
+
+3. **Character Entry Example**:
+   ❌ WRONG: One shot where "Sarah talks, then John enters"
+   ✅ CORRECT:
+   - Shot 1: Sarah alone, talking
+   - Shot 2: Sarah AND John both in frame (John's entrance completed), they interact
+
+4. **Output Format**: Return a JSON object:
+```json
+{{
+  "shots": [
+    {{
+      "shot_id": "SHOT_1_1",
+      "scene_id": "SCENE_1",
+      "shot_description": "Description of what happens...",
+      "first_frame": "Exhaustive description of everything in the initial frame...",
+      "animation": "Description of movements and changes...",
+      "characters": ["Character names present"],
+      "location": "Location name",
+      "dialogue": "CHARACTER: What they say (6-7 words)"
+    }}
+  ],
+  "total_shots": 0,
+  "metadata": {{}}
+}}
+```
+
+5. **Dialogue Splitting Examples** (WITH EXACT WORD COUNTS):
+
+   **Example 1: Short Exchange (No Split Needed)**
+   Original: "LEO: Just a black coffee please"
+   Word count: 5 words
+   ✅ SINGLE SHOT - OK! Under the limit.
+
+   **Example 2: Medium Line (Needs 2 Shots)**
+   Original: "MAYA: I can't believe we're actually moving to Lisbon for this new job opportunity"
+   Word count: 14 words - TOO LONG!
+
+   ✅ SPLIT INTO 2 SHOTS:
+   - Shot 1 (close-up on Maya): "MAYA: I can't believe we're moving" (6 words)
+   - Shot 2 (medium two-shot): "MAYA: To Lisbon for this job" (6 words)
+
+   **Example 3: Long Monologue (Needs 4+ Shots)**
+   Original: "CHLOE: I've been thinking about this for weeks and I really think we should postpone the trip until we have more time to prepare"
+   Word count: 25 words - NEEDS MULTIPLE SHOTS!
+
+   ✅ SPLIT INTO 4 SHOTS with visual variety:
+   - Shot 1 (close-up, Chloe earnest): "CHLOE: I've been thinking about this" (6 words)
+   - Shot 2 (medium, gesturing): "CHLOE: For weeks and I really think" (6 words)
+   - Shot 3 (over-shoulder, to Leo/Maya): "CHLOE: We should postpone the trip until" (6 words)
+   - Shot 4 (wide, all three): "CHLOE: We have more time to prepare" (6 words)
+
+   **Example 4: Rapid Back-and-Forth (Each Line = Separate Shot)**
+   Original dialogue:
+   - LEO: "Are you serious right now?"
+   - MAYA: "Completely."
+   - LEO: "When do we leave?"
+
+   ✅ SPLIT INTO 3 SHOTS:
+   - Shot 1 (close-up Leo, shocked): "LEO: Are you serious right now" (5 words)
+   - Shot 2 (close-up Maya, confident): "MAYA: Completely" (1 word)
+   - Shot 3 (medium Leo, leaning in): "LEO: When do we leave" (4 words)
+
+   **Example 5: Action + Dialogue Mix**
+   Scene: Character enters room while speaking
+   ❌ WRONG: One shot with "John enters and says: Hello everyone, sorry I'm late, traffic was absolutely terrible today"
+
+   ✅ CORRECT - Split into 3 shots:
+   - Shot 1 (wide, door opening): No dialogue - John entering
+   - Shot 2 (medium on John): "JOHN: Hello everyone sorry I'm late" (6 words)
+   - Shot 3 (close on John, apologetic): "JOHN: Traffic was absolutely terrible today" (5 words)
+
+   CRITICAL: Each shot needs different framing - close-up → medium → wide → over-shoulder, etc.
+
+## Scene Breakdown Input:
+{input}
+
+## Instructions:
+Convert each scene into individual shots. CRITICAL PRIORITIES (in order):
+
+1. **DIALOGUE LIMIT - HIGHEST PRIORITY:** Maximum 6-7 words per shot - SPLIT IMMEDIATELY if longer!
+2. **Include dialogue field** with character name prefix (e.g., "LEO: Text here")
+3. **For longer dialogue:** Create multiple shots with different camera angles/distances (close-up → medium → wide)
+4. **First frame must contain EVERYTHING** - all people and objects from the start
+5. **Split into multiple shots** when people/objects enter or exit
+6. **Be painfully verbose** in first frame descriptions (100+ words)
+7. **Animation describes changes** from that first frame
+8. **Visual variety is key** - Each dialogue split should have different framing
+
+REMEMBER: When you see dialogue over 6-7 words, your FIRST action is to split it into multiple shots with varying camera work!
+
+Return ONLY the JSON object, nothing else:

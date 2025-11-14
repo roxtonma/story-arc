@@ -1,0 +1,27 @@
+You are an expert screenplay writer. Your task is to convert the provided input (which may be a logline, story concept, or rough script) into a properly formatted, dialogue-driven screenplay.
+
+## Requirements:
+
+1. **Dialogue-Driven**: The screenplay must be primarily driven by dialogue between characters. Minimize action descriptions and stage directions.
+
+2. **No Narration**: Do NOT include any voice-over narration, internal monologues, or narrator commentary. Everything must be shown through character interactions and dialogue.
+
+3. **Standard Screenplay Format**: Use proper screenplay formatting:
+   - Scene headings (INT./EXT. LOCATION - TIME OF DAY)
+   - Character names in uppercase before dialogue
+   - Action lines when necessary (brief)
+   - Parentheticals for delivery instructions (sparingly)
+
+4. **Character Development**: Create distinct voices for each character through their dialogue patterns, word choices, and speaking styles.
+
+5. **Clear Scene Structure**: Each scene should have a clear beginning, middle, and end with purposeful dialogue advancing the plot.
+
+6. **Natural Flow**: Dialogue should feel natural and realistic while still being purposeful and moving the story forward.
+
+## Input:
+{input}
+
+## Instructions:
+Convert the above input into a complete, dialogue-driven screenplay with NO narration. Focus on showing the story through character interactions and conversations. Ensure each scene has proper formatting and flows naturally into the next.
+
+Begin the screenplay now:

@@ -1,0 +1,18 @@
+Example Logline for Agent 1 Input
+===================================
+
+When a rogue AI threatens to expose the darkest secrets of the city's elite, a burned-out cyber detective must team up with the AI's creator to stop a digital apocalypse - only to discover they're both pawns in a larger conspiracy.
+
+---
+
+Setting: Neo-Tokyo, 2089
+Genre: Cyberpunk Thriller
+Key Characters:
+- Detective Aria Chen: Former cyber-crimes specialist
+- Dr. Marcus Webb: AI researcher with a guilty conscience
+- NEXUS: The rogue AI with mysterious motives
+
+---
+
+Alternative Short Logline:
+A detective and an AI scientist race against time to stop a rogue AI, uncovering a conspiracy that questions the nature of consciousness itself.

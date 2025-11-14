@@ -1,0 +1,72 @@
+# Story Architect Configuration
+app:
+  name: "Story Architect"
+  version: "1.0.0"
+  max_retries: 3
+  session_autosave: true
+
+# Gemini API Settings
+gemini:
+  model: "gemini-2.5-pro"
+  temperature: 0.7
+  max_output_tokens: 32000
+  timeout: 300  # seconds
+
+  # Authentication Mode
+  use_vertex_ai: true  # Set to true to use Vertex AI instead of direct API
+
+  # Vertex AI Configuration (only used when use_vertex_ai: true)
+  vertex_ai:
+    project_id: ""  # Set via GOOGLE_CLOUD_PROJECT env var or here
+    location: "us-central1"  # Options: us-central1, us-east1, europe-west1, asia-northeast1, global
+    credentials_file: "google-credentials.json"  # Path to service account JSON file
+
+# Agent Configurations
+agents:
+  agent_1:
+    name: "Screenplay Generator"
+    enabled: true
+    temperature: 0.8
+    max_output_tokens: 32000
+    prompt_file: "prompts/agent_1_prompt.txt"
+
+  agent_2:
+    name: "Scene Breakdown"
+    enabled: true
+    temperature: 0.7
+    max_output_tokens: 32000
+    prompt_file: "prompts/agent_2_prompt.txt"
+    output_format: "json"
+
+  agent_3:
+    name: "Shot Breakdown"
+    enabled: true
+    temperature: 0.6
+    max_output_tokens: 32000
+    prompt_file: "prompts/agent_3_prompt.txt"
+    output_format: "json"
+    strict_json: true
+
+  agent_4:
+    name: "Shot Grouping"
+    enabled: true
+    temperature: 0.5
+    max_output_tokens: 32000
+    prompt_file: "prompts/agent_4_prompt.txt"
+    output_format: "json"
+
+# Output Settings
+output:
+  base_directory: "outputs/projects"
+  log_directory: "outputs/logs"
+  save_intermediate: true
+  create_timestamp_folders: true
+
+# GUI Settings
+gui:
+  theme: "light"
+  page_title: "Story Architect"
+  page_icon: "🎬"
+  layout: "wide"
+  show_session_history: true
+  max_session_history: 20
