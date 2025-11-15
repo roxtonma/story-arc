@@ -33,6 +33,9 @@ class ChildImageGeneratorAgent(BaseAgent):
         # Create directory
         self.child_shots_dir.mkdir(parents=True, exist_ok=True)
 
+        # Prompt optimization toggle
+        self.use_optimizer = config.get("use_prompt_optimizer", True)
+
     def validate_input(self, input_data: Any) -> bool:
         """Validate input data."""
         if not isinstance(input_data, dict):
@@ -123,7 +126,8 @@ class ChildImageGeneratorAgent(BaseAgent):
                     shot_details,
                     scene_breakdown,
                     parent_image_path,
-                    grids_by_chars
+                    grids_by_chars,
+                    shots_by_id
                 )
 
                 # Add newly generated child to lookup for future grandchildren
@@ -221,6 +225,94 @@ class ChildImageGeneratorAgent(BaseAgent):
 
         return descriptions
 
+    def _detect_edit_type(
+        self,
+        shot_id: str,
+        parent_id: str,
+        shot_details: Dict[str, Any],
+        shots_by_id: Dict[str, Any]
+    ) -> str:
+        """
+        Detect the type of edit operation.
+
+        Returns: 'add_character', 'remove_character', 'expression_change', 'camera_change'
+        """
+        parent_chars = set(shots_by_id.get(parent_id, {}).get("characters", []))
+        child_chars = set(shot_details.get("characters", []))
+
+        if len(child_chars) > len(parent_chars):
+            return "add_character"
+        elif len(child_chars) < len(parent_chars):
+            return "remove_character"
+        elif parent_chars != child_chars:
+            return "character_swap"
+        else:
+            # Same characters - likely camera or expression change
+            # Check first_frame for indicators
+            first_frame = shot_details.get("first_frame", "").lower()
+            if any(word in first_frame for word in ["close-up", "close up", "zoom", "tighter"]):
+                return "camera_change"
+            elif any(word in first_frame for word in ["expression", "smile", "frown", "angry", "happy"]):
+                return "expression_change"
+            else:
+                return "camera_change"  # Default assumption
+
+    def _optimize_edit_prompt_with_pro(self, verbose_prompt: str, edit_type: str) -> str:
+        """
+        Use Gemini Pro 2.5 to optimize the verbose edit prompt following best practices.
+
+        Args:
+            verbose_prompt: The filled template prompt
+            edit_type: Type of edit detected
+
+        Returns:
+            Optimized edit prompt for Flash Image
+        """
+        from google.genai import types
+
+        # Check if optimization is enabled
+        if not self.use_optimizer:
+            logger.debug("Prompt optimization disabled in config")
+            return verbose_prompt
+
+        # Load optimizer template
+        optimizer_template_path = Path("prompts/agent_8_optimizer_prompt.txt")
+        if not optimizer_template_path.exists():
+            logger.warning("Optimizer template not found, using verbose prompt as-is")
+            return verbose_prompt
+
+        with open(optimizer_template_path, 'r', encoding='utf-8') as f:
+            optimizer_template = f.read()
+
+        # Create optimization prompt
+        optimization_prompt = optimizer_template.format(
+            verbose_edit_description=verbose_prompt
+        )
+
+        try:
+            # Use Pro 2.5 to optimize
+            logger.debug(f"Optimizing edit prompt with Pro 2.5 (edit_type: {edit_type})...")
+            response = self.client.client.models.generate_content(
+                model="gemini-2.5-pro",
+                contents=[optimization_prompt],
+                config=types.GenerateContentConfig(
+                    temperature=0.1,  # Very low temp for precise, consistent edit instructions
+                    max_output_tokens=1500
+                )
+            )
+
+            if response.text:
+                optimized = response.text.strip()
+                logger.info(f"Edit prompt optimized: {len(verbose_prompt)} → {len(optimized)} chars (type: {edit_type})")
+                return optimized
+            else:
+                logger.warning("Pro optimization returned empty, using verbose prompt")
+                return verbose_prompt
+
+        except Exception as e:
+            logger.warning(f"Edit prompt optimization failed: {str(e)}, using verbose prompt")
+            return verbose_prompt
+
     def _generate_child_shot_image(
         self,
         shot_id: str,
@@ -228,10 +320,15 @@ class ChildImageGeneratorAgent(BaseAgent):
         shot_details: Dict[str, Any],
         scene_breakdown: Dict[str, Any],
         parent_image_path: Path,
-        grids_by_chars: Dict[tuple, Path]
+        grids_by_chars: Dict[tuple, Path],
+        shots_by_id: Dict[str, Any]
     ) -> Path:
         """Generate child shot by editing parent shot."""
         from google.genai import types
+
+        # Detect edit type for optimizer
+        edit_type = self._detect_edit_type(shot_id, parent_id, shot_details, shots_by_id)
+        logger.debug(f"Edit type detected: {edit_type}")
 
         # Load parent image (PRIMARY INPUT #1)
         parent_image = Image.open(parent_image_path)
@@ -269,7 +366,7 @@ When editing the parent shot, identify this character by these exact physical tr
         if not self.prompt_template:
             raise ValueError("Prompt template not loaded")
 
-        edit_prompt = self.prompt_template.format(
+        verbose_prompt = self.prompt_template.format(
             shot_id=shot_id,
             parent_id=parent_id,
             first_frame=first_frame,
@@ -277,7 +374,10 @@ When editing the parent shot, identify this character by these exact physical tr
             location=location_name
         )
 
-        # Prepare contents: [parent image, character grid (if available), edit prompt]
+        # Optimize edit prompt using Pro 2.5 following best practices
+        optimized_prompt = self._optimize_edit_prompt_with_pro(verbose_prompt, edit_type)
+
+        # Prepare contents: [parent image, character grid (if available), optimized edit prompt]
         contents = [parent_image]
 
         if grid_path and grid_path.exists():
@@ -285,7 +385,8 @@ When editing the parent shot, identify this character by these exact physical tr
             contents.append(grid_image)
             logger.debug(f"Using character grid for editing: {grid_path.name}")
 
-        contents.append(edit_prompt)
+        contents.append(optimized_prompt)
+        logger.debug(f"Using optimized edit prompt (type: {edit_type})")
 
         # Generate edited image
         response = self.client.client.models.generate_content(
@@ -325,7 +426,14 @@ When editing the parent shot, identify this character by these exact physical tr
                 "parent_shot_id": parent_id,
                 "characters": characters,
                 "location": location_name,
-                "generated_at": datetime.now().isoformat()
+                "generated_at": datetime.now().isoformat(),
+                "edit_type": edit_type,
+                "grid_used": str(grid_path) if grid_path and grid_path.exists() else None,
+                "prompts": {
+                    "verbose_prompt": verbose_prompt,
+                    "optimized_prompt": optimized_prompt,
+                    "optimizer_used": self.use_optimizer
+                }
             }
         )
 

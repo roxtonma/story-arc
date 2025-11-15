@@ -32,6 +32,9 @@ class ParentImageGeneratorAgent(BaseAgent):
         # Create directory
         self.parent_shots_dir.mkdir(parents=True, exist_ok=True)
 
+        # Prompt optimization toggle
+        self.use_optimizer = config.get("use_prompt_optimizer", True)
+
     def validate_input(self, input_data: Any) -> bool:
         """Validate input data."""
         if not isinstance(input_data, dict):
@@ -232,6 +235,61 @@ class ParentImageGeneratorAgent(BaseAgent):
         logger.warning(f"Full location description not found for: {location_name}")
         return location_name
 
+    def _optimize_prompt_with_pro(self, verbose_prompt: str) -> str:
+        """
+        Use Gemini Pro 2.5 to optimize the verbose prompt for image generation.
+
+        Args:
+            verbose_prompt: The filled template prompt
+
+        Returns:
+            Optimized prompt for Flash Image
+        """
+        from google.genai import types
+
+        # Check if optimization is enabled
+        if not self.use_optimizer:
+            logger.debug("Prompt optimization disabled in config")
+            return verbose_prompt
+
+        # Load optimizer template
+        optimizer_template_path = Path("prompts/agent_6_optimizer_prompt.txt")
+        if not optimizer_template_path.exists():
+            logger.warning("Optimizer template not found, using verbose prompt as-is")
+            return verbose_prompt
+
+        with open(optimizer_template_path, 'r', encoding='utf-8') as f:
+            optimizer_template = f.read()
+
+        # Create optimization prompt
+        optimization_prompt = optimizer_template.format(
+            verbose_scene_description=verbose_prompt
+        )
+
+        try:
+            # Use Pro 2.5 to optimize
+            logger.debug("Optimizing prompt with Gemini Pro 2.5...")
+            response = self.client.client.models.generate_content(
+                model="gemini-2.5-pro",
+                contents=[optimization_prompt],
+                config=types.GenerateContentConfig(
+                    temperature=0.3,  # Low temp for consistent optimization
+                    max_output_tokens=2000
+                )
+            )
+
+            if response.text:
+                optimized = response.text.strip()
+                logger.info(f"Prompt optimized: {len(verbose_prompt)} → {len(optimized)} chars")
+                return optimized
+            else:
+                logger.warning("Pro optimization returned empty, using verbose prompt")
+                return verbose_prompt
+
+        except Exception as e:
+            logger.warning(f"Prompt optimization failed: {str(e)}, using verbose prompt")
+            return verbose_prompt
+
     def _generate_parent_shot_image(
         self,
         shot_id: str,
@@ -306,22 +364,25 @@ This character must be placed in the scene exactly as they appear in the grid, m
         if not self.prompt_template:
             raise ValueError("Prompt template not loaded")
 
-        prompt = self.prompt_template.format(
+        verbose_prompt = self.prompt_template.format(
             shot_id=shot_id,
             first_frame=first_frame,
             location_description=location_description,
             character_descriptions=char_desc_text
         )
 
+        # Optimize prompt using Pro 2.5 before sending to Flash Image
+        optimized_prompt = self._optimize_prompt_with_pro(verbose_prompt)
+
         # Prepare contents: Grid first if available (transformation), otherwise text only (generation)
         if grid_image:
             # CRITICAL: Grid image is FIRST (the thing being transformed)
-            contents = [grid_image, prompt]
-            logger.debug("Using grid transformation mode")
+            contents = [grid_image, optimized_prompt]
+            logger.debug("Using grid transformation mode with optimized prompt")
         else:
             # No grid - generate from description only
-            contents = [prompt]
-            logger.debug("Using text-only generation mode (no characters in shot)")
+            contents = [optimized_prompt]
+            logger.debug("Using text-only generation mode with optimized prompt")
 
         # Generate/transform image
         response = self.client.client.models.generate_content(
@@ -361,7 +422,12 @@ This character must be placed in the scene exactly as they appear in the grid, m
                 "characters": characters,
                 "location": location_name,
                 "generated_at": datetime.now().isoformat(),
-                "grid_used": str(grid_path) if grid_path else "none"
+                "grid_used": str(grid_path) if grid_path else "none",
+                "prompts": {
+                    "verbose_prompt": verbose_prompt,
+                    "optimized_prompt": optimized_prompt,
+                    "optimizer_used": self.use_optimizer
+                }
             }
         )
 

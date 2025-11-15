@@ -75,6 +75,7 @@ agents:
     image_size: "2K"
     max_retries: 3
     prompt_file: "prompts/agent_6_prompt.txt"
+    use_prompt_optimizer: true  # Use Gemini Pro 2.5 to optimize prompts before image generation
 
   agent_7:
     name: "Parent Verification"
@@ -94,6 +95,7 @@ agents:
     aspect_ratio: "16:9"
     max_retries: 3
     prompt_file: "prompts/agent_8_prompt.txt"
+    use_prompt_optimizer: true  # Use Gemini Pro 2.5 for precise edit prompts
 
   agent_9:
     name: "Child Verification"
