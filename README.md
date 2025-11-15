@@ -422,10 +422,6 @@ See pricing: https://ai.google.dev/gemini-api/docs/pricing
 
 Contributions are welcome! Please open an issue or submit a pull request.
 
-## License
-
-MIT License - see LICENSE file for details
-
 ## Acknowledgments
 
 Built with Google Gemini 2.5 Pro, Gemini 2.5 Flash Image, and Streamlit
