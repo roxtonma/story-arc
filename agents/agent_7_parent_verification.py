@@ -31,6 +31,28 @@ class ParentVerificationAgent(BaseAgent):
         self.confidence_threshold = config.get("confidence_threshold", 0.7)
         self.soft_failure_mode = config.get("soft_failure_mode", True)
 
+        # Load template paths from config
+        self.verification_template_path = Path(config.get(
+            "verification_prompt_file",
+            "prompts/agent_7_verification_prompt.txt"
+        ))
+        self.modifier_template_path = Path(config.get(
+            "modifier_prompt_file",
+            "prompts/agent_7_prompt_modifier.txt"
+        ))
+        self.agent6_template_path = Path(config.get(
+            "agent_6_prompt_file",
+            "prompts/agent_6_prompt.txt"
+        ))
+
+        # Validate templates exist
+        if not self.verification_template_path.exists():
+            raise FileNotFoundError(f"Verification template not found: {self.verification_template_path}")
+        if not self.modifier_template_path.exists():
+            raise FileNotFoundError(f"Modifier template not found: {self.modifier_template_path}")
+        if not self.agent6_template_path.exists():
+            raise FileNotFoundError(f"Agent 6 template not found: {self.agent6_template_path}")
+
     def validate_input(self, input_data: Any) -> bool:
         """Validate input data."""
         if not isinstance(input_data, dict):
@@ -115,7 +137,7 @@ class ParentVerificationAgent(BaseAgent):
                     parent_shot["final_verification"] = {
                         "approved": False,
                         "confidence": 0.0,
-                        "issues": [str(e)],
+                        "issues": [{"category": "Execution Error", "description": str(e)}],
                         "recommendation": "manual_review"
                     }
                     verified_shots.append(parent_shot)
@@ -179,7 +201,9 @@ class ParentVerificationAgent(BaseAgent):
                     contents=[image, verification_prompt],
                     config=types.GenerateContentConfig(
                         temperature=0.3,
-                        max_output_tokens=2000
+                        max_output_tokens=8192,
+                        response_mime_type="application/json",
+                        response_json_schema=VerificationResult.model_json_schema()
                     )
                 )
 
@@ -233,7 +257,8 @@ class ParentVerificationAgent(BaseAgent):
                         scene_breakdown,
                         grids_by_chars,
                         result.get("issues", []),
-                        attempt + 1
+                        attempt + 1,
+                        parent_shot  # Pass original parent shot data with saved prompts
                     )
 
                     current_image_path = new_image_path
@@ -244,7 +269,7 @@ class ParentVerificationAgent(BaseAgent):
                 verification_history.append({
                     "approved": False,
                     "confidence": 0.0,
-                    "issues": [str(e)],
+                    "issues": [{"category": "Verification Error", "description": str(e)}],
                     "recommendation": "regenerate"
                 })
 
@@ -254,7 +279,7 @@ class ParentVerificationAgent(BaseAgent):
         fallback_result = {
             "approved": False,
             "confidence": 0.0,
-            "issues": ["All verification attempts failed"],
+            "issues": [{"category": "Verification Failure", "description": "All verification attempts failed"}],
             "recommendation": "manual_review"
         }
 
@@ -280,24 +305,17 @@ class ParentVerificationAgent(BaseAgent):
         shot_details: Dict[str, Any],
         scene_breakdown: Dict[str, Any],
         grids_by_chars: Dict[tuple, str],
-        verification_issues: List[str],
-        attempt_number: int
+        verification_issues: List[Dict[str, str]],
+        attempt_number: int,
+        original_parent_shot: Dict[str, Any]
     ) -> Path:
-        """Regenerate parent shot with feedback from verification."""
+        """Regenerate parent shot with intelligently rewritten prompt based on verification issues."""
         from google.genai import types
 
-        # Get shot components
-        first_frame = shot_details.get("first_frame", "")
-        characters = shot_details.get("characters", [])
-        scene_id = shot_details.get("scene_id", "")
-        location_name = shot_details.get("location", "")
-
-        # Get descriptions
-        character_descriptions = self._get_character_physical_descriptions(characters, scene_breakdown)
-        location_description = self._get_location_full_description(location_name, scene_id, scene_breakdown)
-
         # Find grid if needed
+        characters = shot_details.get("characters", [])
         grid_image = None
+        grid_path = None
         if characters:
             char_combo = tuple(sorted(characters))
             grid_path = grids_by_chars.get(char_combo)
@@ -306,20 +324,40 @@ class ParentVerificationAgent(BaseAgent):
                 if full_grid_path.exists():
                     grid_image = Image.open(full_grid_path)
 
-        # Format prompt with FEEDBACK
-        prompt = self._format_regeneration_prompt(
-            shot_id,
-            first_frame,
-            character_descriptions,
-            location_description,
-            verification_issues
+        # Step 1: Load metadata from disk JSON file to get original optimized prompt
+        image_path = self.session_dir / original_parent_shot["image_path"]
+        metadata_path = image_path.with_suffix('.json')
+
+        if not metadata_path.exists():
+            raise FileNotFoundError(f"Metadata file not found for retry: {metadata_path}")
+
+        with open(metadata_path, 'r', encoding='utf-8') as f:
+            metadata = json.load(f)
+
+        original_optimized_prompt = metadata.get("prompts", {}).get("optimized_prompt")
+
+        if not original_optimized_prompt:
+            logger.warning(f"{shot_id}: No optimized prompt in metadata")
+            raise ValueError(f"Original optimized prompt not found in metadata for {shot_id}")
+
+        logger.debug(f"{shot_id}: Loaded optimized prompt from disk metadata: {metadata_path.name}")
+
+        # Step 2: Intelligently rewrite the OPTIMIZED prompt (not verbose!)
+        rewritten_prompt = self._rewrite_prompt_with_feedback(
+            original_optimized_prompt,  # Rewrite the actual prompt that was sent to Flash
+            verification_issues,
+            shot_details,
+            shot_id
         )
+
+        # Step 3: Use rewritten prompt directly (no additional optimization needed)
+        final_prompt = rewritten_prompt
 
         # Generate
         if grid_image:
-            contents = [grid_image, prompt]
+            contents = [grid_image, final_prompt]
         else:
-            contents = [prompt]
+            contents = [final_prompt]
 
         response = self.client.client.models.generate_content(
             model="gemini-2.5-flash-image",
@@ -349,7 +387,12 @@ class ParentVerificationAgent(BaseAgent):
         save_image_with_metadata(generated_image, new_image_path, metadata={
             "shot_id": shot_id,
             "attempt": attempt_number,
-            "regenerated_with_feedback": verification_issues
+            "grid_used": str(grid_path) if grid_path else "none",
+            "regenerated_with_feedback": verification_issues,
+            "prompts": {
+                "original_optimized_prompt": original_optimized_prompt,
+                "rewritten_prompt": rewritten_prompt
+            }
         })
 
         logger.info(f"Regenerated {shot_id}: {new_image_path.name}")
@@ -379,128 +422,176 @@ class ParentVerificationAgent(BaseAgent):
                 return scene.get("location", {}).get("description", location_name)
         return location_name
 
-    def _format_regeneration_prompt(
+    def _analyze_failure_pattern(
         self,
-        shot_id: str,
-        first_frame: str,
-        character_descriptions: List[Dict[str, str]],
-        location_description: str,
-        verification_issues: List[str]
+        issues: List[Dict[str, str]],
+        shot_details: Dict[str, Any]
     ) -> str:
-        """Format prompt with verification feedback for regeneration."""
+        """
+        Analyze issues to identify failure patterns for parent shot generation.
 
-        # Load Agent 6's prompt template (for generation)
-        agent6_prompt_path = Path("prompts/agent_6_prompt.txt")
-        if not agent6_prompt_path.exists():
-            raise ValueError("Agent 6 prompt template not found")
+        Args:
+            issues: List of categorized issues from verification
+            shot_details: Parent shot details
 
-        with open(agent6_prompt_path, 'r', encoding='utf-8') as f:
-            generation_template = f.read()
+        Returns:
+            Pattern analysis string for prompt modifier
+        """
+        categories = [issue.get("category", "") for issue in issues]
 
-        # Format character descriptions
-        char_desc_text = ""
-        for idx, char in enumerate(character_descriptions, 1):
-            char_desc_text += f"""
-CHARACTER {idx} (from grid position {idx}):
-PHYSICAL APPEARANCE: {char['physical_description']}
+        patterns = []
 
-This character must be placed in the scene exactly as they appear in the grid, maintaining their physical appearance, clothing, hair, facial features, and all other visual characteristics precisely.
+        # Character count issues
+        if "Extra Character" in categories or "Duplicate Character" in categories:
+            char_count = len(shot_details.get("characters", []))
+            patterns.append(f"EXTRA_CHARACTER: More than {char_count} characters appeared. Needs explicit 'EXACTLY {char_count} characters' constraint.")
 
-"""
+        # Missing characters
+        if "Missing Character" in categories:
+            patterns.append("MISSING_CHARACTER: Expected character not visible. Needs explicit placement instruction for each character.")
 
-        # Format base prompt
-        base_prompt = generation_template.format(
-            shot_id=shot_id,
-            first_frame=first_frame,
-            location_description=location_description,
-            character_descriptions=char_desc_text
+        # Poor integration
+        if "Pasted Character" in categories:
+            patterns.append("POOR_INTEGRATION: Character looks artificial. Needs lighting direction/intensity match, scale/depth matching, and natural placement instructions.")
+
+        # Grid artifacts
+        if "Grid Artifact" in categories:
+            patterns.append("GRID_ARTIFACT: Character grid structure leaked into output. Needs strong 'unified scene, NO grid elements, fill entire frame' emphasis at prompt start.")
+
+        # Composition issues
+        if "Bad Composition" in categories:
+            patterns.append("COMPOSITION_ISSUE: Vague framing instructions caused awkward layout. Needs objective spatial description of frame regions and character positions.")
+
+        # Proportion issues
+        if "Bad Proportions" in categories:
+            patterns.append("PROPORTION_ISSUE: Character scales inconsistent. Needs explicit scale/distance references and perspective cues.")
+
+        # Lighting mismatch
+        if "Lighting Mismatch" in categories:
+            patterns.append("LIGHTING_MISMATCH: Characters have different lighting. Needs unified light source description affecting all characters equally.")
+
+        # Poor location
+        if "Poor Location" in categories:
+            patterns.append("POOR_LOCATION: Environment lacks detail or doesn't match description. Needs more specific environmental details and architectural elements.")
+
+        return "\n".join(f"- {pattern}" for pattern in patterns) if patterns else "- GENERAL_ISSUES: Address the specific issues listed."
+
+    def _rewrite_prompt_with_feedback(
+        self,
+        original_prompt: str,
+        categorized_issues: List[Dict[str, str]],
+        shot_details: Dict[str, Any],
+        shot_id: str
+    ) -> str:
+        """
+        Use Pro 2.5 to intelligently rewrite prompt based on verification issues.
+
+        Args:
+            original_prompt: The verbose prompt that was used
+            categorized_issues: List of issues with category and description
+            shot_details: Parent shot target details
+            shot_id: Shot identifier for logging
+
+        Returns:
+            Rewritten prompt addressing root causes
+        """
+        from google.genai import types
+
+        # Load modifier template from config
+        modifier_template_path = self.modifier_template_path
+        if not modifier_template_path.exists():
+            logger.warning(f"{shot_id}: Modifier template not found, using feedback append fallback")
+            # Fallback: just append issues
+            issues_text = "\n".join(f"- {issue['category']}: {issue['description']}" for issue in categorized_issues)
+            return original_prompt + f"\n\nCRITICAL ISSUES TO FIX:\n{issues_text}"
+
+        with open(modifier_template_path, 'r', encoding='utf-8') as f:
+            modifier_template = f.read()
+
+        # Analyze failure patterns
+        pattern_analysis = self._analyze_failure_pattern(categorized_issues, shot_details)
+
+        # Format issues for template
+        issues_text = "\n".join(
+            f"- Category: {issue['category']}\n  Description: {issue['description']}"
+            for issue in categorized_issues
         )
 
-        # Add verification feedback
-        feedback_section = f"""
+        # Create modification prompt
+        modification_prompt = modifier_template.format(
+            original_prompt=original_prompt,
+            categorized_issues=issues_text,
+            pattern_analysis=pattern_analysis
+        )
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CRITICAL: PREVIOUS ATTEMPT HAD THESE ISSUES - FIX THEM:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        try:
+            logger.debug(f"{shot_id}: Rewriting prompt with Pro 2.5 based on patterns...")
+            response = self.client.client.models.generate_content(
+                model="gemini-2.5-pro",
+                contents=[modification_prompt],
+                config=types.GenerateContentConfig(
+                    temperature=0.2,
+                    max_output_tokens=8192
+                )
+            )
 
-"""
-        for idx, issue in enumerate(verification_issues, 1):
-            feedback_section += f"{idx}. {issue}\n"
+            if response.text:
+                rewritten_prompt = response.text.strip()
+                logger.info(f"{shot_id}: Prompt intelligently rewritten (patterns: {len(pattern_analysis.split(chr(10)))} detected)")
+                return rewritten_prompt
+            else:
+                logger.warning(f"{shot_id}: Prompt rewrite returned empty, using original")
+                return original_prompt
 
-        feedback_section += """
-IMPORTANT: Address ALL of the above issues in your regeneration. The previous image did not meet requirements. This is a retry - make sure to correct these specific problems.
-
-"""
-
-        return base_prompt + feedback_section
+        except Exception as e:
+            logger.error(f"{shot_id}: Prompt rewrite failed: {str(e)}, using original")
+            return original_prompt
 
     def _format_verification_prompt(self, shot_details: Dict[str, Any]) -> str:
-        """Format verification prompt for Gemini 2.5 Pro."""
+        """
+        Format verification prompt from template with full requirement context.
+
+        Args:
+            shot_details: Parent shot target details
+
+        Returns:
+            Formatted verification prompt
+        """
+        # Load verification template from config
+        template_path = self.verification_template_path
+        if not template_path.exists():
+            logger.warning(f"Verification template not found: {template_path}")
+            raise FileNotFoundError(f"Verification template required but not found: {template_path}")
+
+        with open(template_path, 'r', encoding='utf-8') as f:
+            template = f.read()
+
+        # Prepare context
         first_frame = shot_details.get("first_frame", "")
         characters = shot_details.get("characters", [])
         location = shot_details.get("location", "")
 
-        prompt = f"""
-You are a quality control expert for AI-generated images used in video production.
+        # Format template
+        prompt = template.format(
+            expected_characters=", ".join(characters),
+            location=location,
+            first_frame=first_frame
+        )
 
-Analyze this generated image and verify it matches the required specifications.
-
-EXPECTED FIRST FRAME DESCRIPTION:
-{first_frame}
-
-EXPECTED CHARACTERS: {", ".join(characters)}
-EXPECTED LOCATION: {location}
-
-Verification Criteria:
-1. COMPOSITION: Does the image composition match the description?
-2. CHARACTERS: Are all specified characters present and visually distinguishable?
-3. LOCATION: Does the setting/environment match the described location?
-4. VISUAL QUALITY: Is the image clear, well-lit, and cinematic?
-5. CONSISTENCY: Are there any hallucinations, artifacts, or unexpected elements?
-
-Respond ONLY with valid JSON in this exact format:
-{{
-  "approved": true or false,
-  "confidence": 0.0 to 1.0,
-  "issues": ["list of specific issues found", "empty array if approved"],
-  "recommendation": "approve" or "regenerate" or "manual_review"
-}}
-
-Provide your verification now:
-"""
         return prompt
 
     def _parse_verification_response(self, response_text: str) -> Dict[str, Any]:
-        """Parse verification JSON response."""
+        """Parse verification JSON response with schema validation."""
         try:
             result = json.loads(response_text)
-
-            if "approved" not in result:
-                result["approved"] = False
-            if "confidence" not in result:
-                result["confidence"] = 0.0
-            if "issues" not in result:
-                result["issues"] = []
-            if "recommendation" not in result:
-                result["recommendation"] = "manual_review"
-
-            return result
-
-        except json.JSONDecodeError:
-            start_idx = response_text.find('{')
-            end_idx = response_text.rfind('}')
-
-            if start_idx != -1 and end_idx != -1:
-                json_str = response_text[start_idx:end_idx + 1]
-                try:
-                    return json.loads(json_str)
-                except json.JSONDecodeError:
-                    pass
-
-            logger.warning("Could not parse verification JSON, using fallback")
+            # Validate with Pydantic
+            validated = VerificationResult(**result)
+            return validated.model_dump()
+        except (json.JSONDecodeError, ValidationError) as e:
+            logger.warning(f"Verification response parse/validation failed: {str(e)}")
             return {
                 "approved": False,
                 "confidence": 0.0,
-                "issues": ["Could not parse verification response"],
+                "issues": [{"category": "Parse Error", "description": str(e)}],
                 "recommendation": "manual_review"
             }

@@ -1,0 +1,55 @@
+You are an expert at correcting image generation prompts that produced flawed results.
+
+ORIGINAL EDIT PROMPT:
+{original_prompt}
+
+VERIFICATION ISSUES DETECTED:
+{categorized_issues}
+
+FAILURE PATTERN ANALYSIS:
+{pattern_analysis}
+
+Your task: Create a CORRECTED edit prompt that addresses the root causes of these issues.
+
+REWRITING STRATEGIES BY ISSUE TYPE:
+
+**For "OTS Failure" or "Extra Character" in OTS shots:**
+DO NOT use shorthand like "over-the-shoulder shot" or "OTS angle".
+Instead, provide OBJECTIVE spatial description:
+- Describe EXACTLY what should be visible in each part of the frame
+- Example: "In the bottom left foreground, we see the back of [character X description]'s head and shoulder, out of focus. The camera is focused on [character Y description] who occupies the right side of the mid-ground, facing toward the camera."
+- Specify depths: foreground (out of focus) vs background (in focus)
+- Use frame regions: top/bottom, left/right, center
+
+**For "Extra Character" or character duplication:**
+- Explicitly state: "EXACTLY [number] characters should be visible"
+- List each character with unique identifiers (physical traits)
+- Add: "No additional people, no duplicates, no background figures that look like main characters"
+
+**For "Pasted Character" or poor integration:**
+- Add lighting match instructions: "The new character should have the same lighting direction and intensity as existing characters"
+- Add depth/scale instructions: "The new character should be at the same depth/distance as the reference character, matching their scale"
+- Add spatial anchoring: "Position the new character standing next to the existing character, with both feet on the same floor plane"
+
+**For "Grid Artifact" or white borders:**
+- Add at start: "CRITICAL: Generate a complete, unified cinematic scene filling the entire 16:9 frame. NO grid lines, NO white borders, NO blank regions, NO reference image artifacts."
+- Emphasize scene completion
+
+**For "Bad Composition" or awkward framing:**
+- Replace vague framing with explicit spatial layout
+- Describe visible elements in each frame region
+- Specify what should be in focus vs out of focus
+
+**For "Bad Proportions":**
+- Add scale references: "Character should be at a distance from camera, appearing at a size relative to reference objects"
+- Specify perspective cues
+
+REWRITE GUIDELINES:
+1. Identify which part of the original prompt caused the issue
+2. Replace that section with objective, spatial, verbose description
+3. Don't just append - restructure the problematic sections
+4. Keep working parts of the original prompt
+5. Make the corrected prompt 50-100% longer if needed for clarity
+6. Use spatial language: "foreground", "midground", "background", "left third", "right side", etc.
+
+Return ONLY the complete corrected prompt, nothing else. Format it as a natural language single para edit prompt.

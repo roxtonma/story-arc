@@ -76,6 +76,7 @@ agents:
     max_retries: 3
     prompt_file: "prompts/agent_6_prompt.txt"
     use_prompt_optimizer: true  # Use Gemini Pro 2.5 to optimize prompts before image generation
+    optimizer_prompt_file: "prompts/agent_6_optimizer_prompt.txt"
 
   agent_7:
     name: "Parent Verification"
@@ -85,7 +86,9 @@ agents:
     max_retries: 3
     confidence_threshold: 0.7
     soft_failure_mode: true
-    prompt_file: "prompts/agent_7_prompt.txt"
+    verification_prompt_file: "prompts/agent_7_verification_prompt.txt"
+    modifier_prompt_file: "prompts/agent_7_prompt_modifier.txt"
+    agent_6_prompt_file: "prompts/agent_6_prompt.txt"  # For regeneration (uses Agent 6's generation template)
 
   agent_8:
     name: "Child Image Generator"
@@ -96,6 +99,7 @@ agents:
     max_retries: 3
     prompt_file: "prompts/agent_8_prompt.txt"
     use_prompt_optimizer: true  # Use Gemini Pro 2.5 for precise edit prompts
+    optimizer_prompt_file: "prompts/agent_8_optimizer_prompt.txt"
 
   agent_9:
     name: "Child Verification"
@@ -106,7 +110,9 @@ agents:
     confidence_threshold: 0.7
     consistency_threshold: 0.6
     soft_failure_mode: true
-    prompt_file: "prompts/agent_9_prompt.txt"
+    verification_prompt_file: "prompts/agent_9_verification_prompt.txt"
+    modifier_prompt_file: "prompts/agent_9_prompt_modifier.txt"
+    agent_8_prompt_file: "prompts/agent_8_prompt.txt"  # For regeneration (uses Agent 8's edit template)
 
 # Output Settings
 output:

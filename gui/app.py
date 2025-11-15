@@ -436,7 +436,12 @@ def display_session_results(session: SessionState):
                         if final_ver:
                             st.write(f"**Confidence:** {final_ver.get('confidence', 0):.2f}")
                             if final_ver.get("issues"):
-                                st.warning(f"**Issues:** {', '.join(final_ver['issues'])}")
+                                # Handle categorized issues (List[Dict] with category and description)
+                                issue_strs = [
+                                    f"{iss.get('category', 'Issue')}: {iss.get('description', '')}"
+                                    for iss in final_ver['issues']
+                                ]
+                                st.warning(f"**Issues:** {', '.join(issue_strs)}")
 
                 # Download
                 st.download_button(

@@ -179,11 +179,20 @@ class CharacterCreationOutput(BaseModel):
     )
 
 
+class VerificationIssue(BaseModel):
+    """Single verification issue with category."""
+    category: str = Field(..., description="Issue category (e.g., 'Extra Character', 'Grid Artifact')")
+    description: str = Field(..., description="Detailed description of the issue")
+
+
 class VerificationResult(BaseModel):
     """Image verification result."""
     approved: bool = Field(..., description="Whether image is approved")
-    confidence: float = Field(..., description="Confidence score (0.0-1.0)")
-    issues: List[str] = Field(default_factory=list, description="List of issues found")
+    confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence score (0.0-1.0)")
+    issues: List[VerificationIssue] = Field(
+        default_factory=list,
+        description="List of categorized issues found"
+    )
     recommendation: Literal["approve", "regenerate", "manual_review"] = Field(
         ...,
         description="Recommended action"

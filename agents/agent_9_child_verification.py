@@ -33,6 +33,28 @@ class ChildVerificationAgent(BaseAgent):
         self.consistency_threshold = config.get("consistency_threshold", 0.6)
         self.soft_failure_mode = config.get("soft_failure_mode", True)
 
+        # Load template paths from config
+        self.verification_template_path = Path(config.get(
+            "verification_prompt_file",
+            "prompts/agent_9_verification_prompt.txt"
+        ))
+        self.modifier_template_path = Path(config.get(
+            "modifier_prompt_file",
+            "prompts/agent_9_prompt_modifier.txt"
+        ))
+        self.agent8_template_path = Path(config.get(
+            "agent_8_prompt_file",
+            "prompts/agent_8_prompt.txt"
+        ))
+
+        # Validate templates exist
+        if not self.verification_template_path.exists():
+            raise FileNotFoundError(f"Verification template not found: {self.verification_template_path}")
+        if not self.modifier_template_path.exists():
+            raise FileNotFoundError(f"Modifier template not found: {self.modifier_template_path}")
+        if not self.agent8_template_path.exists():
+            raise FileNotFoundError(f"Agent 8 template not found: {self.agent8_template_path}")
+
     def validate_input(self, input_data: Any) -> bool:
         """Validate input data."""
         if not isinstance(input_data, dict):
@@ -115,7 +137,9 @@ class ChildVerificationAgent(BaseAgent):
                     shot_details,
                     scene_breakdown,
                     parent_image_path,
-                    grids_by_chars
+                    grids_by_chars,
+                    parent_id,
+                    shots_by_id
                 )
 
                 # Update child shot data
@@ -145,7 +169,7 @@ class ChildVerificationAgent(BaseAgent):
                     child_shot["final_verification"] = {
                         "approved": False,
                         "confidence": 0.0,
-                        "issues": [str(e)],
+                        "issues": [{"category": "Execution Error", "description": str(e)}],
                         "recommendation": "manual_review"
                     }
                     verified_shots.append(child_shot)
@@ -194,13 +218,38 @@ class ChildVerificationAgent(BaseAgent):
         shot_details: Dict[str, Any],
         scene_breakdown: Dict[str, Any],
         parent_image_path: Optional[Path],
-        grids_by_chars: Dict[tuple, Path]
+        grids_by_chars: Dict[tuple, Path],
+        parent_id: Optional[str],
+        shots_by_id: Dict[str, Any]
     ) -> Dict[str, Any]:
         """Verify child image and regenerate with feedback if verification fails."""
         from google.genai import types
 
         shot_id = child_shot["shot_id"]
         image_path = self.session_dir / child_shot["image_path"]
+
+        # Get parent shot details and edit type for verification context
+        parent_shot_details = shots_by_id.get(parent_id) if parent_id else None
+
+        # Detect edit type
+        if parent_shot_details:
+            parent_chars = set(parent_shot_details.get("characters", []))
+            child_chars = set(shot_details.get("characters", []))
+
+            if len(child_chars) > len(parent_chars):
+                edit_type = "add_character"
+            elif len(child_chars) < len(parent_chars):
+                edit_type = "remove_character"
+            elif parent_chars != child_chars:
+                edit_type = "character_swap"
+            else:
+                first_frame_lower = shot_details.get("first_frame", "").lower()
+                if any(word in first_frame_lower for word in ["close-up", "close up", "zoom", "tighter"]):
+                    edit_type = "camera_change"
+                else:
+                    edit_type = "expression_change"
+        else:
+            edit_type = "unknown"
 
         verification_history = []
         best_result = None
@@ -223,7 +272,12 @@ class ChildVerificationAgent(BaseAgent):
                     parent_image = Image.open(parent_image_path)
 
                 # Verify
-                verification_prompt = self._format_verification_prompt(shot_details, has_parent=parent_image is not None)
+                verification_prompt = self._format_verification_prompt(
+                    shot_details,
+                    parent_shot_details,
+                    edit_type,
+                    has_parent=parent_image is not None
+                )
 
                 contents = [child_image]
                 if parent_image:
@@ -235,7 +289,9 @@ class ChildVerificationAgent(BaseAgent):
                     contents=contents,
                     config=types.GenerateContentConfig(
                         temperature=0.3,
-                        max_output_tokens=2000
+                        max_output_tokens=8192,
+                        response_mime_type="application/json",
+                        response_json_schema=VerificationResult.model_json_schema()
                     )
                 )
 
@@ -278,7 +334,7 @@ class ChildVerificationAgent(BaseAgent):
                 if attempt < self.max_verification_retries - 1:
                     logger.warning(f"{shot_id}: Not approved, regenerating...")
 
-                    # Regenerate with feedback
+                    # Regenerate with intelligent prompt rewriting
                     new_image_path = self._regenerate_child_shot(
                         shot_id,
                         shot_details,
@@ -286,7 +342,9 @@ class ChildVerificationAgent(BaseAgent):
                         parent_image_path,
                         grids_by_chars,
                         result.get("issues", []),
-                        attempt + 1
+                        edit_type,
+                        attempt + 1,
+                        child_shot  # Pass original child shot data with saved prompts
                     )
 
                     current_image_path = new_image_path
@@ -297,7 +355,7 @@ class ChildVerificationAgent(BaseAgent):
                 verification_history.append({
                     "approved": False,
                     "confidence": 0.0,
-                    "issues": [str(e)],
+                    "issues": [{"category": "Verification Error", "description": str(e)}],
                     "recommendation": "regenerate"
                 })
 
@@ -307,7 +365,7 @@ class ChildVerificationAgent(BaseAgent):
         fallback_result = {
             "approved": False,
             "confidence": 0.0,
-            "issues": ["All verification attempts failed"],
+            "issues": [{"category": "Verification Failure", "description": "All verification attempts failed"}],
             "recommendation": "manual_review"
         }
 
@@ -333,10 +391,12 @@ class ChildVerificationAgent(BaseAgent):
         scene_breakdown: Dict[str, Any],
         parent_image_path: Optional[Path],
         grids_by_chars: Dict[tuple, Path],
-        verification_issues: List[str],
-        attempt_number: int
+        verification_issues: List[Dict[str, str]],
+        edit_type: str,
+        attempt_number: int,
+        original_child_shot: Dict[str, Any]
     ) -> Path:
-        """Regenerate child shot with feedback from verification."""
+        """Regenerate child shot with intelligently rewritten prompt based on verification issues."""
         from google.genai import types
 
         # Validate parent image exists
@@ -356,33 +416,47 @@ class ChildVerificationAgent(BaseAgent):
         # Load parent image
         parent_image = Image.open(parent_image_path)
 
-        # Get shot components
-        first_frame = shot_details.get("first_frame", "")
-        characters = shot_details.get("characters", [])
-        location_name = shot_details.get("location", "")
-
-        # Get descriptions
-        character_descriptions = self._get_character_physical_descriptions(characters, scene_breakdown)
-
         # Find grid if needed
+        characters = shot_details.get("characters", [])
         char_combo = tuple(sorted(characters))
         grid_path = grids_by_chars.get(char_combo)
 
-        # Format prompt with FEEDBACK
-        prompt = self._format_regeneration_prompt(
-            shot_id,
-            first_frame,
-            character_descriptions,
-            location_name,
-            verification_issues
+        # Step 1: Load metadata from disk JSON file to get original optimized prompt
+        image_path = self.session_dir / original_child_shot["image_path"]
+        metadata_path = image_path.with_suffix('.json')
+
+        if not metadata_path.exists():
+            raise FileNotFoundError(f"Metadata file not found for retry: {metadata_path}")
+
+        with open(metadata_path, 'r', encoding='utf-8') as f:
+            metadata = json.load(f)
+
+        original_optimized_prompt = metadata.get("prompts", {}).get("optimized_prompt")
+
+        if not original_optimized_prompt:
+            logger.warning(f"{shot_id}: No optimized prompt in metadata")
+            raise ValueError(f"Original optimized prompt not found in metadata for {shot_id}")
+
+        logger.debug(f"{shot_id}: Loaded optimized prompt from disk metadata: {metadata_path.name}")
+
+        # Step 2: Intelligently rewrite the OPTIMIZED prompt (not verbose!)
+        rewritten_prompt = self._rewrite_prompt_with_feedback(
+            original_optimized_prompt,  # Rewrite the actual prompt that was sent to Flash
+            verification_issues,
+            shot_details,
+            edit_type,
+            shot_id
         )
+
+        # Step 3: Use rewritten prompt directly (no additional optimization needed)
+        final_prompt = rewritten_prompt
 
         # Prepare contents
         contents = [parent_image]
         if grid_path and grid_path.exists():
             grid_image = Image.open(grid_path)
             contents.append(grid_image)
-        contents.append(prompt)
+        contents.append(final_prompt)
 
         # Generate
         response = self.client.client.models.generate_content(
@@ -413,7 +487,13 @@ class ChildVerificationAgent(BaseAgent):
         save_image_with_metadata(generated_image, new_image_path, metadata={
             "shot_id": shot_id,
             "attempt": attempt_number,
-            "regenerated_with_feedback": verification_issues
+            "edit_type": edit_type,
+            "grid_used": str(grid_path) if grid_path and grid_path.exists() else None,
+            "regenerated_with_feedback": verification_issues,
+            "prompts": {
+                "original_optimized_prompt": original_optimized_prompt,
+                "rewritten_prompt": rewritten_prompt
+            }
         })
 
         logger.info(f"Regenerated {shot_id}: {new_image_path.name}")
@@ -436,138 +516,205 @@ class ChildVerificationAgent(BaseAgent):
 
         return descriptions
 
-    def _format_regeneration_prompt(
+    def _analyze_failure_pattern(
         self,
-        shot_id: str,
-        first_frame: str,
-        character_descriptions: List[Dict[str, str]],
-        location: str,
-        verification_issues: List[str]
+        issues: List[Dict[str, str]],
+        shot_details: Dict[str, Any],
+        edit_type: str
     ) -> str:
-        """Format prompt with verification feedback for child regeneration."""
+        """
+        Analyze issues to identify failure patterns and suggest rewrite strategy.
 
-        # Load Agent 8's prompt template (for child generation)
-        agent8_prompt_path = Path("prompts/agent_8_prompt.txt")
-        if not agent8_prompt_path.exists():
-            raise ValueError("Agent 8 prompt template not found")
+        Args:
+            issues: List of categorized issues from verification
+            shot_details: Child shot details
+            edit_type: Type of edit operation
 
-        with open(agent8_prompt_path, 'r', encoding='utf-8') as f:
-            generation_template = f.read()
+        Returns:
+            Pattern analysis string for prompt modifier
+        """
+        categories = [issue.get("category", "") for issue in issues]
 
-        # Format character descriptions
-        char_desc_text = ""
-        for idx, char in enumerate(character_descriptions, 1):
-            char_desc_text += f"""
-CHARACTER {idx}:
-PHYSICAL TRAITS: {char['physical_description']}
+        patterns = []
 
-When editing the parent shot, identify this character by these exact physical traits.
+        # OTS failure pattern
+        first_frame_upper = shot_details.get("first_frame", "").upper()
+        if "OTS Failure" in categories or ("Extra Character" in categories and any(ots in first_frame_upper for ots in ["OVER-THE-SHOULDER", "OVER THE SHOULDER", "OTS"])):
+            patterns.append("OTS_SHOT_MISINTERPRETED: Model created new character instead of changing camera angle. Needs explicit spatial frame description with foreground/background positioning.")
 
-"""
+        # Character duplication or extras
+        if "Extra Character" in categories or "Duplicate Character" in categories:
+            char_count = len(shot_details.get("characters", []))
+            patterns.append(f"EXTRA_CHARACTER: More than {char_count} characters appeared. Needs explicit 'EXACTLY {char_count} characters' constraint.")
 
-        # Format base prompt
-        base_prompt = generation_template.format(
-            shot_id=shot_id,
-            parent_id="unknown",  # Not critical for regeneration
-            first_frame=first_frame,
-            character_descriptions=char_desc_text,
-            location=location
+        # Poor integration
+        if "Pasted Character" in categories:
+            patterns.append("POOR_INTEGRATION: Added character looks artificial. Needs lighting direction/intensity match, scale/depth matching, and spatial anchoring instructions.")
+
+        # Grid artifacts
+        if "Grid Artifact" in categories:
+            patterns.append("GRID_ARTIFACT: Reference grid structure leaked into output. Needs strong 'unified scene, no grid elements' emphasis at prompt start.")
+
+        # Composition issues
+        if "Bad Composition" in categories:
+            patterns.append("COMPOSITION_ISSUE: Vague framing instructions caused awkward layout. Needs objective spatial description of frame regions.")
+
+        # Proportion issues
+        if "Bad Proportions" in categories:
+            patterns.append("PROPORTION_ISSUE: Character scales inconsistent. Needs explicit scale/distance references and perspective cues.")
+
+        # Missing characters
+        if "Missing Character" in categories:
+            patterns.append("MISSING_CHARACTER: Expected character not visible. Needs explicit placement instruction for each character.")
+
+        return "\n".join(f"- {pattern}" for pattern in patterns) if patterns else "- GENERAL_ISSUES: Address the specific issues listed."
+
+    def _rewrite_prompt_with_feedback(
+        self,
+        original_prompt: str,
+        categorized_issues: List[Dict[str, str]],
+        shot_details: Dict[str, Any],
+        edit_type: str,
+        shot_id: str
+    ) -> str:
+        """
+        Use Pro 2.5 to intelligently rewrite prompt based on verification issues.
+
+        Args:
+            original_prompt: The verbose prompt that was used
+            categorized_issues: List of issues with category and description
+            shot_details: Child shot target details
+            edit_type: Type of edit operation
+            shot_id: Shot identifier for logging
+
+        Returns:
+            Rewritten prompt addressing root causes
+        """
+        from google.genai import types
+
+        # Load modifier template from config
+        modifier_template_path = self.modifier_template_path
+        if not modifier_template_path.exists():
+            logger.warning(f"{shot_id}: Modifier template not found, using feedback append fallback")
+            # Fallback: just append issues
+            issues_text = "\n".join(f"- {issue['category']}: {issue['description']}" for issue in categorized_issues)
+            return original_prompt + f"\n\nCRITICAL ISSUES TO FIX:\n{issues_text}"
+
+        with open(modifier_template_path, 'r', encoding='utf-8') as f:
+            modifier_template = f.read()
+
+        # Analyze failure patterns
+        pattern_analysis = self._analyze_failure_pattern(categorized_issues, shot_details, edit_type)
+
+        # Format issues for template
+        issues_text = "\n".join(
+            f"- Category: {issue['category']}\n  Description: {issue['description']}"
+            for issue in categorized_issues
         )
 
-        # Add verification feedback
-        feedback_section = f"""
+        # Create modification prompt
+        modification_prompt = modifier_template.format(
+            original_prompt=original_prompt,
+            categorized_issues=issues_text,
+            pattern_analysis=pattern_analysis
+        )
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-CRITICAL: PREVIOUS ATTEMPT HAD THESE ISSUES - FIX THEM:
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        try:
+            logger.debug(f"{shot_id}: Rewriting prompt with Pro 2.5 based on patterns...")
+            response = self.client.client.models.generate_content(
+                model="gemini-2.5-pro",
+                contents=[modification_prompt],
+                config=types.GenerateContentConfig(
+                    temperature=0.2,
+                    max_output_tokens=8192
+                )
+            )
 
-"""
-        for idx, issue in enumerate(verification_issues, 1):
-            feedback_section += f"{idx}. {issue}\n"
+            if response.text:
+                rewritten_prompt = response.text.strip()
+                logger.info(f"{shot_id}: Prompt intelligently rewritten (patterns: {len(pattern_analysis.split(chr(10)))} detected)")
+                return rewritten_prompt
+            else:
+                logger.warning(f"{shot_id}: Prompt rewrite returned empty, using original")
+                return original_prompt
 
-        feedback_section += """
-IMPORTANT: Address ALL of the above issues in your regeneration. This is a retry - correct these specific problems while maintaining visual continuity with the parent shot.
+        except Exception as e:
+            logger.error(f"{shot_id}: Prompt rewrite failed: {str(e)}, using original")
+            return original_prompt
 
-"""
+    def _format_verification_prompt(
+        self,
+        shot_details: Dict[str, Any],
+        parent_shot_details: Optional[Dict[str, Any]],
+        edit_type: str,
+        has_parent: bool
+    ) -> str:
+        """
+        Format verification prompt from template with full requirement context.
 
-        return base_prompt + feedback_section
+        Args:
+            shot_details: Child shot target details
+            parent_shot_details: Parent shot details (for comparison)
+            edit_type: Type of edit operation
+            has_parent: Whether parent image is available
 
-    def _format_verification_prompt(self, shot_details: Dict[str, Any], has_parent: bool) -> str:
-        """Format verification prompt."""
+        Returns:
+            Formatted verification prompt
+        """
+        # Load verification template from config
+        template_path = self.verification_template_path
+        if not template_path.exists():
+            logger.warning(f"Verification template not found: {template_path}")
+            raise FileNotFoundError(f"Verification template required but not found: {template_path}")
+
+        with open(template_path, 'r', encoding='utf-8') as f:
+            template = f.read()
+
+        # Prepare context
         first_frame = shot_details.get("first_frame", "")
         characters = shot_details.get("characters", [])
         location = shot_details.get("location", "")
 
-        prompt = f"""
-You are a quality control expert for AI-generated video sequences.
+        # Parent context
+        parent_context_prefix = " and compare it with the parent shot image (if provided)" if has_parent else ""
 
-Analyze this child shot image{"and compare it with the parent shot image (second image provided)" if has_parent else ""}.
+        if has_parent and parent_shot_details:
+            parent_first_frame = parent_shot_details.get("first_frame", "")
+            parent_characters = parent_shot_details.get("characters", [])
+            parent_context = f"""
+PARENT SHOT CONTEXT (What we're editing from):
+- Characters in parent: {", ".join(parent_characters)}
+- Parent composition: {parent_first_frame}
 
-EXPECTED CHILD SHOT DESCRIPTION:
-{first_frame}
-
-EXPECTED CHARACTERS: {", ".join(characters)}
-EXPECTED LOCATION: {location}
-
-Verification Criteria:
-1. COMPOSITION: Does the child shot match its description?
-2. CHARACTERS: Are all specified characters present and visually correct?
-3. LOCATION: Does the setting match the described location?
-4. VISUAL QUALITY: Is the image clear and cinematic?
+NOTE: If the edit type is '{edit_type}', then differences in characters/composition may be INTENTIONAL.
 """
+        else:
+            parent_context = ""
 
-        if has_parent:
-            prompt += """
-5. CONSISTENCY: Does it maintain visual consistency with the parent shot?
-6. CONTINUITY: Is there smooth visual continuity from parent to child?
-"""
-
-        prompt += """
-
-Respond ONLY with valid JSON in this exact format:
-{
-  "approved": true or false,
-  "confidence": 0.0 to 1.0,
-  "issues": ["list of specific issues", "empty if approved"],
-  "recommendation": "approve" or "regenerate" or "manual_review"
-}
-
-Provide your verification now:
-"""
+        # Format template
+        prompt = template.format(
+            parent_context_prefix=parent_context_prefix,
+            expected_characters=", ".join(characters),
+            location=location,
+            first_frame=first_frame,
+            edit_type=edit_type,
+            parent_context=parent_context
+        )
 
         return prompt
 
     def _parse_verification_response(self, response_text: str) -> Dict[str, Any]:
-        """Parse verification JSON response."""
+        """Parse verification JSON response with schema validation."""
         try:
             result = json.loads(response_text)
-
-            if "approved" not in result:
-                result["approved"] = False
-            if "confidence" not in result:
-                result["confidence"] = 0.0
-            if "issues" not in result:
-                result["issues"] = []
-            if "recommendation" not in result:
-                result["recommendation"] = "manual_review"
-
-            return result
-
-        except json.JSONDecodeError:
-            start_idx = response_text.find('{')
-            end_idx = response_text.rfind('}')
-
-            if start_idx != -1 and end_idx != -1:
-                json_str = response_text[start_idx:end_idx + 1]
-                try:
-                    return json.loads(json_str)
-                except json.JSONDecodeError:
-                    pass
-
-            logger.warning("Could not parse verification JSON")
+            # Validate with Pydantic
+            validated = VerificationResult(**result)
+            return validated.model_dump()
+        except (json.JSONDecodeError, ValidationError) as e:
+            logger.warning(f"Verification response parse/validation failed: {str(e)}")
             return {
                 "approved": False,
                 "confidence": 0.0,
-                "issues": ["Could not parse verification response"],
+                "issues": [{"category": "Parse Error", "description": str(e)}],
                 "recommendation": "manual_review"
             }

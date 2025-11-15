@@ -32,8 +32,16 @@ class ParentImageGeneratorAgent(BaseAgent):
         # Create directory
         self.parent_shots_dir.mkdir(parents=True, exist_ok=True)
 
-        # Prompt optimization toggle
+        # Prompt optimization toggle and template path
         self.use_optimizer = config.get("use_prompt_optimizer", True)
+        self.optimizer_template_path = Path(config.get(
+            "optimizer_prompt_file",
+            "prompts/agent_6_optimizer_prompt.txt"
+        ))
+
+        # Validate optimizer template if enabled
+        if self.use_optimizer and not self.optimizer_template_path.exists():
+            raise FileNotFoundError(f"Optimizer template not found: {self.optimizer_template_path}")
 
     def validate_input(self, input_data: Any) -> bool:
         """Validate input data."""
@@ -252,10 +260,10 @@ class ParentImageGeneratorAgent(BaseAgent):
             logger.debug("Prompt optimization disabled in config")
             return verbose_prompt
 
-        # Load optimizer template
-        optimizer_template_path = Path("prompts/agent_6_optimizer_prompt.txt")
+        # Load optimizer template from config
+        optimizer_template_path = self.optimizer_template_path
         if not optimizer_template_path.exists():
-            logger.warning("Optimizer template not found, using verbose prompt as-is")
+            logger.warning(f"Optimizer template not found: {optimizer_template_path}, using verbose prompt as-is")
             return verbose_prompt
 
         with open(optimizer_template_path, 'r', encoding='utf-8') as f:
@@ -274,7 +282,7 @@ class ParentImageGeneratorAgent(BaseAgent):
                 contents=[optimization_prompt],
                 config=types.GenerateContentConfig(
                     temperature=0.3,  # Low temp for consistent optimization
-                    max_output_tokens=2000
+                    max_output_tokens=8192
                 )
             )
 

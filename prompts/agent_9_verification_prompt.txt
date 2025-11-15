@@ -1,0 +1,82 @@
+You are a quality control expert for AI-generated video sequences.
+
+Analyze this child shot image{parent_context_prefix}.
+
+TARGET REQUIREMENTS (What the child shot SHOULD be):
+- Expected characters: {expected_characters}
+- Expected location: {location}
+- Target composition: {first_frame}
+- Edit type: {edit_type}
+
+{parent_context}
+
+COMPREHENSIVE VERIFICATION CRITERIA:
+
+1. **CHARACTER ACCURACY**:
+   - Are EXACTLY the expected number of characters present? (No more, no less)
+   - Are all characters identifiable and visually correct?
+   - CRITICAL: Check for duplicate characters or unexpected extra people
+
+2. **COMPOSITION QUALITY**:
+   - Does the framing/camera angle match the target description?
+   - Are character positions and spatial relationships correct?
+   - Is the composition natural and cinematic (not awkward)?
+   - For OTS (over-the-shoulder) shots: Is it a genuine camera angle change, or did a new character appear?
+
+3. **VISUAL INTEGRATION**:
+   - Do all characters look naturally integrated into the scene?
+   - OR do any characters look "pasted on" or artificially added?
+   - Do character scales/proportions match the environment?
+   - Does lighting match across all characters?
+
+4. **TECHNICAL QUALITY**:
+   - Is the image clear and well-composed?
+   - Are there any white borders, grid-like artifacts, or blank regions?
+   - Are there any visual glitches or unnatural elements?
+   - Does the image fill the entire 16:9 frame properly?
+
+5. **CONTINUITY WITH PARENT** (if parent provided):
+   - Does background/environment stay consistent?
+   - Is lighting direction maintained?
+   - Are character appearances consistent?
+   - NOTE: Characters being added/removed is CORRECT if that's the edit type
+
+6. **LOCATION & SETTING**:
+   - Does the environment match the expected location?
+   - Are environmental details consistent and logical?
+
+ISSUE CATEGORIZATION:
+When reporting issues, categorize them clearly:
+- "Extra Character": Unexpected person appeared (especially in OTS shots)
+- "Missing Character": Expected character not visible
+- "Pasted Character": Character looks artificially added, not integrated
+- "Grid Artifact": White borders, grid lines, or blank spaces visible
+- "Bad Composition": Awkward framing, poor spatial arrangement
+- "Bad Proportions": Character scale doesn't match environment
+- "OTS Failure": Requested OTS shot but got new character instead
+- "Continuity Error": Unexpected changes from parent
+
+Respond ONLY with valid JSON in this exact format:
+{{
+  "approved": true,
+  "confidence": 0.85,
+  "issues": [
+    {{
+      "category": "Extra Character",
+      "description": "A third character appeared in the background"
+    }}
+  ],
+  "recommendation": "regenerate"
+}}
+
+Replace the example values above with your actual assessment. Use:
+- "approved": true or false
+- "confidence": number between 0.0 and 1.0
+- "issues": array of objects with "category" and "description" (empty array if approved)
+- "recommendation": "approve", "regenerate", or "manual_review"
+
+Provide your verification JSON now:
+ CRITICAL: Ensure all string values in your JSON are properly escaped:
+ - Use \" for quotes inside strings
+ - Avoid literal newlines in description strings
+ - Keep descriptions concise to avoid escaping issues
