@@ -23,6 +23,7 @@ Style Requirements:
 - Cinematic quality
 - Front-facing portrait
 - Consistent design for video generation reference
+- Photorealistic style
 ---
 
 Note: This is a code-driven agent, not prompt-template driven.

@@ -17,6 +17,10 @@ from pydantic import ValidationError
 from agents.base_agent import BaseAgent
 from core.validators import ChildShotsOutput, VerificationResult
 from core.image_utils import save_image_with_metadata
+from utils.fal_helper import (
+    generate_with_fal_edit,
+    is_fal_available
+)
 
 
 class ChildVerificationAgent(BaseAgent):
@@ -451,31 +455,99 @@ class ChildVerificationAgent(BaseAgent):
         # Step 3: Use rewritten prompt directly (no additional optimization needed)
         final_prompt = rewritten_prompt
 
-        # Prepare contents
-        contents = [parent_image]
-        if grid_path and grid_path.exists():
-            grid_image = Image.open(grid_path)
-            contents.append(grid_image)
-        contents.append(final_prompt)
+        # Check image provider from config
+        image_provider = self.config.get("image_provider", "gemini").lower()
+        fal_seed = None
 
-        # Generate
-        response = self.client.client.models.generate_content(
-            model="gemini-2.5-flash-image",
-            contents=contents,
-            config=types.GenerateContentConfig(
-                response_modalities=["IMAGE"],
-                image_config=types.ImageConfig(aspect_ratio="16:9"),
-                temperature=0.8,
-            ),
-        )
+        if image_provider == "fal":
+            # Use fal for child shot regeneration (always edit mode with parent image)
+            logger.info(f"Using fal for child shot regeneration: {shot_id} (attempt {attempt_number})")
 
-        # Extract and save
-        generated_image = None
-        for part in response.parts:
-            if part.inline_data is not None:
-                gemini_image = part.as_image()
-                generated_image = Image.open(BytesIO(gemini_image.image_bytes))
-                break
+            if not is_fal_available():
+                logger.warning("fal_client not available, falling back to Gemini")
+                image_provider = "gemini"
+            else:
+                try:
+                    fal_model = self.config.get(
+                        "fal_edit_model",
+                        "fal-ai/bytedance/seedream/v4/edit"
+                    )
+                    logger.debug(f"Using fal edit mode for regeneration (type: {edit_type})")
+
+                    # Save parent image temporarily to upload to fal
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                        parent_image.save(tmp.name)
+                        tmp_parent_path = Path(tmp.name)
+
+                    # Collect all input images for fal (parent + optional grid)
+                    image_paths = [tmp_parent_path]
+                    tmp_grid_path = None
+
+                    if grid_path and grid_path.exists():
+                        grid_image = Image.open(grid_path)
+                        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_grid:
+                            grid_image.save(tmp_grid.name)
+                            tmp_grid_path = Path(tmp_grid.name)
+                        image_paths.append(tmp_grid_path)
+                        logger.debug(f"Using character grid for regeneration: {grid_path.name}")
+
+                    try:
+                        generated_image, fal_seed = generate_with_fal_edit(
+                            prompt=final_prompt,
+                            image_paths=image_paths,
+                            model=fal_model,
+                            width=3840,
+                            height=2160,
+                            num_images=1,
+                            enable_safety_checker=True,
+                            enhance_prompt_mode="standard"
+                        )
+
+                        logger.info(f"Successfully regenerated child shot with fal (seed: {fal_seed})")
+
+                    finally:
+                        # Clean up temp files
+                        tmp_parent_path.unlink(missing_ok=True)
+                        if tmp_grid_path:
+                            tmp_grid_path.unlink(missing_ok=True)
+
+                except Exception as e:
+                    logger.error(f"Failed to regenerate with fal: {e}, falling back to Gemini")
+                    image_provider = "gemini"
+                    generated_image = None
+
+        # Use Gemini for child shot regeneration (default or fallback)
+        if image_provider == "gemini":
+            from google.genai import types
+
+            logger.info(f"Using Gemini for child shot regeneration: {shot_id} (attempt {attempt_number})")
+
+            # Prepare contents
+            contents = [parent_image]
+            if grid_path and grid_path.exists():
+                grid_image = Image.open(grid_path)
+                contents.append(grid_image)
+            contents.append(final_prompt)
+
+            # Generate
+            response = self.client.client.models.generate_content(
+                model="gemini-2.5-flash-image",
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    response_modalities=["IMAGE"],
+                    image_config=types.ImageConfig(aspect_ratio="16:9"),
+                    temperature=0.8,
+                ),
+            )
+
+            # Extract and save
+            generated_image = None
+            for part in response.parts:
+                if part.inline_data is not None:
+                    gemini_image = part.as_image()
+                    generated_image = Image.open(BytesIO(gemini_image.image_bytes))
+                    break
 
         if not generated_image:
             raise ValueError(f"No image generated for {shot_id} retry")
@@ -484,17 +556,24 @@ class ChildVerificationAgent(BaseAgent):
         image_filename = f"{shot_id}_child_retry{attempt_number}.png"
         new_image_path = self.child_shots_dir / image_filename
 
-        save_image_with_metadata(generated_image, new_image_path, metadata={
+        regen_metadata = {
             "shot_id": shot_id,
             "attempt": attempt_number,
             "edit_type": edit_type,
+            "image_provider": image_provider,
             "grid_used": str(grid_path) if grid_path and grid_path.exists() else None,
             "regenerated_with_feedback": verification_issues,
             "prompts": {
                 "original_optimized_prompt": original_optimized_prompt,
                 "rewritten_prompt": rewritten_prompt
             }
-        })
+        }
+
+        # Add fal-specific metadata if applicable
+        if fal_seed is not None:
+            regen_metadata["fal_seed"] = fal_seed
+
+        save_image_with_metadata(generated_image, new_image_path, metadata=regen_metadata)
 
         logger.info(f"Regenerated {shot_id}: {new_image_path.name}")
         return new_image_path

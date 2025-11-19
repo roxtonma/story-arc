@@ -16,6 +16,10 @@ from pydantic import ValidationError
 from agents.base_agent import BaseAgent
 from core.validators import ChildShotsOutput
 from core.image_utils import save_image_with_metadata
+from utils.fal_helper import (
+    generate_with_fal_edit,
+    is_fal_available
+)
 
 
 class ChildImageGeneratorAgent(BaseAgent):
@@ -385,39 +389,107 @@ When editing the parent shot, identify this character by these exact physical tr
         # Optimize edit prompt using Pro 2.5 following best practices
         optimized_prompt = self._optimize_edit_prompt_with_pro(verbose_prompt, edit_type)
 
-        # Prepare contents: [parent image, character grid (if available), optimized edit prompt]
-        contents = [parent_image]
+        # Check image provider from config
+        image_provider = self.config.get("image_provider", "gemini").lower()
+        fal_seed = None
 
-        if grid_path and grid_path.exists():
-            grid_image = Image.open(grid_path)
-            contents.append(grid_image)
-            logger.debug(f"Using character grid for editing: {grid_path.name}")
+        if image_provider == "fal":
+            # Use fal for child shot generation (always edit mode with parent image)
+            logger.info(f"Using fal for child shot generation: {shot_id}")
 
-        contents.append(optimized_prompt)
-        logger.debug(f"Using optimized edit prompt (type: {edit_type})")
+            if not is_fal_available():
+                logger.warning("fal_client not available, falling back to Gemini")
+                image_provider = "gemini"
+            else:
+                try:
+                    fal_model = self.config.get(
+                        "fal_edit_model",
+                        "fal-ai/bytedance/seedream/v4/edit"
+                    )
+                    logger.debug(f"Using fal edit mode (type: {edit_type})")
 
-        # Generate edited image
-        response = self.client.client.models.generate_content(
-            model="gemini-2.5-flash-image",
-            contents=contents,
-            config=types.GenerateContentConfig(
-                response_modalities=["IMAGE"],
-                image_config=types.ImageConfig(
-                    aspect_ratio="16:9",
+                    # Save parent image temporarily to upload to fal
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp:
+                        parent_image.save(tmp.name)
+                        tmp_parent_path = Path(tmp.name)
+
+                    # Collect all input images for fal (parent + optional grid)
+                    image_paths = [tmp_parent_path]
+                    tmp_grid_path = None
+
+                    if grid_path and grid_path.exists():
+                        grid_image = Image.open(grid_path)
+                        with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmp_grid:
+                            grid_image.save(tmp_grid.name)
+                            tmp_grid_path = Path(tmp_grid.name)
+                        image_paths.append(tmp_grid_path)
+                        logger.debug(f"Using character grid for editing: {grid_path.name}")
+
+                    try:
+                        generated_image, fal_seed = generate_with_fal_edit(
+                            prompt=optimized_prompt,
+                            image_paths=image_paths,
+                            model=fal_model,
+                            width=3840,
+                            height=2160,
+                            num_images=1,
+                            enable_safety_checker=True,
+                            enhance_prompt_mode="standard"
+                        )
+
+                        logger.info(f"Successfully generated child shot with fal (seed: {fal_seed})")
+
+                    finally:
+                        # Clean up temp files
+                        tmp_parent_path.unlink(missing_ok=True)
+                        if tmp_grid_path:
+                            tmp_grid_path.unlink(missing_ok=True)
+
+                except Exception as e:
+                    logger.error(f"Failed to generate with fal: {e}, falling back to Gemini")
+                    image_provider = "gemini"
+                    generated_image = None
+
+        # Use Gemini for child shot generation (default or fallback)
+        if image_provider == "gemini":
+            from google.genai import types
+
+            logger.info(f"Using Gemini for child shot generation: {shot_id}")
+
+            # Prepare contents: [parent image, character grid (if available), optimized edit prompt]
+            contents = [parent_image]
+
+            if grid_path and grid_path.exists():
+                grid_image = Image.open(grid_path)
+                contents.append(grid_image)
+                logger.debug(f"Using character grid for editing: {grid_path.name}")
+
+            contents.append(optimized_prompt)
+            logger.debug(f"Using optimized edit prompt (type: {edit_type})")
+
+            # Generate edited image
+            response = self.client.client.models.generate_content(
+                model="gemini-2.5-flash-image",
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    response_modalities=["IMAGE"],
+                    image_config=types.ImageConfig(
+                        aspect_ratio="16:9",
+                    ),
+                    temperature=self.temperature,
                 ),
-                temperature=self.temperature,
-            ),
-        )
+            )
 
-        # Extract generated image and convert to PIL Image
-        generated_image = None
-        for part in response.parts:
-            if part.inline_data is not None:
-                # Get Gemini SDK Image wrapper
-                gemini_image = part.as_image()
-                # Convert to PIL Image
-                generated_image = Image.open(BytesIO(gemini_image.image_bytes))
-                break
+            # Extract generated image and convert to PIL Image
+            generated_image = None
+            for part in response.parts:
+                if part.inline_data is not None:
+                    # Get Gemini SDK Image wrapper
+                    gemini_image = part.as_image()
+                    # Convert to PIL Image
+                    generated_image = Image.open(BytesIO(gemini_image.image_bytes))
+                    break
 
         if not generated_image:
             raise ValueError(f"No image generated for {shot_id}")
@@ -426,23 +498,30 @@ When editing the parent shot, identify this character by these exact physical tr
         image_filename = f"{shot_id}_child.png"
         image_path = self.child_shots_dir / image_filename
 
+        child_metadata = {
+            "shot_id": shot_id,
+            "parent_shot_id": parent_id,
+            "characters": characters,
+            "location": location_name,
+            "generated_at": datetime.now().isoformat(),
+            "edit_type": edit_type,
+            "image_provider": image_provider,
+            "grid_used": str(grid_path) if grid_path and grid_path.exists() else None,
+            "prompts": {
+                "verbose_prompt": verbose_prompt,
+                "optimized_prompt": optimized_prompt,
+                "optimizer_used": self.use_optimizer
+            }
+        }
+
+        # Add fal-specific metadata if applicable
+        if fal_seed is not None:
+            child_metadata["fal_seed"] = fal_seed
+
         save_image_with_metadata(
             generated_image,
             image_path,
-            metadata={
-                "shot_id": shot_id,
-                "parent_shot_id": parent_id,
-                "characters": characters,
-                "location": location_name,
-                "generated_at": datetime.now().isoformat(),
-                "edit_type": edit_type,
-                "grid_used": str(grid_path) if grid_path and grid_path.exists() else None,
-                "prompts": {
-                    "verbose_prompt": verbose_prompt,
-                    "optimized_prompt": optimized_prompt,
-                    "optimizer_used": self.use_optimizer
-                }
-            }
+            metadata=child_metadata
         )
 
         return image_path
