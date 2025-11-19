@@ -7,13 +7,13 @@ app:
 
 # Gemini API Settings
 gemini:
-  model: "gemini-2.5-pro"
+  model: "gemini-3-pro-preview" # gemini-3-pro-preview, gemini-2.5-pro
   temperature: 0.7
   max_output_tokens: 32000
   timeout: 300  # seconds
 
   # Authentication Mode
-  use_vertex_ai: true  # Set to true to use Vertex AI instead of direct API
+  use_vertex_ai: false  # Set to true to use Vertex AI instead of direct API
 
   # Vertex AI Configuration (only used when use_vertex_ai: true)
   vertex_ai:
@@ -65,6 +65,9 @@ agents:
     image_size: "2K"
     grid_aspect_ratio: "16:9"
     prompt_file: "prompts/agent_5_prompt.txt"
+    # Image Provider Settings (gemini or fal)
+    image_provider: "fal"
+    fal_text_to_image_model: "fal-ai/bytedance/seedream/v4/text-to-image"
 
   agent_6:
     name: "Parent Image Generator"
@@ -77,18 +80,26 @@ agents:
     prompt_file: "prompts/agent_6_prompt.txt"
     use_prompt_optimizer: true  # Use Gemini Pro 2.5 to optimize prompts before image generation
     optimizer_prompt_file: "prompts/agent_6_optimizer_prompt.txt"
+    # Image Provider Settings (gemini or fal)
+    image_provider: "fal"
+    fal_text_to_image_model: "fal-ai/bytedance/seedream/v4/text-to-image"
+    fal_edit_model: "fal-ai/bytedance/seedream/v4/edit"
 
   agent_7:
     name: "Parent Verification"
     enabled: true
     temperature: 0.3
-    verification_model: "gemini-2.5-pro"
+    verification_model: "gemini-3-pro-preview"
     max_retries: 3
     confidence_threshold: 0.7
     soft_failure_mode: true
     verification_prompt_file: "prompts/agent_7_verification_prompt.txt"
     modifier_prompt_file: "prompts/agent_7_prompt_modifier.txt"
     agent_6_prompt_file: "prompts/agent_6_prompt.txt"  # For regeneration (uses Agent 6's generation template)
+    # Image Provider Settings (gemini or fal)
+    image_provider: "fal"
+    fal_text_to_image_model: "fal-ai/bytedance/seedream/v4/text-to-image"
+    fal_edit_model: "fal-ai/bytedance/seedream/v4/edit"
 
   agent_8:
     name: "Child Image Generator"
@@ -100,12 +111,15 @@ agents:
     prompt_file: "prompts/agent_8_prompt.txt"
     use_prompt_optimizer: true  # Use Gemini Pro 2.5 for precise edit prompts
     optimizer_prompt_file: "prompts/agent_8_optimizer_prompt.txt"
+    # Image Provider Settings (gemini or fal)
+    image_provider: "fal"
+    fal_edit_model: "fal-ai/bytedance/seedream/v4/edit"
 
   agent_9:
     name: "Child Verification"
     enabled: true
     temperature: 0.3
-    verification_model: "gemini-2.5-pro"
+    verification_model: "gemini-3-pro-preview"
     max_retries: 3
     confidence_threshold: 0.7
     consistency_threshold: 0.6
@@ -113,6 +127,9 @@ agents:
     verification_prompt_file: "prompts/agent_9_verification_prompt.txt"
     modifier_prompt_file: "prompts/agent_9_prompt_modifier.txt"
     agent_8_prompt_file: "prompts/agent_8_prompt.txt"  # For regeneration (uses Agent 8's edit template)
+    # Image Provider Settings (gemini or fal)
+    image_provider: "fal"
+    fal_edit_model: "fal-ai/bytedance/seedream/v4/edit"
 
 # Output Settings
 output:

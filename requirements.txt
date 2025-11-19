@@ -24,3 +24,5 @@ jsonschema>=4.19.0
 
 # Phase 2: Image Generation
 Pillow>=10.0.0  # Image manipulation for character grids
+fal-client>=0.4.1  # fal.ai image generation API
+requests>=2.31.0  # HTTP library for downloading images

@@ -19,6 +19,10 @@ from core.image_utils import (
     create_character_grid,
     save_image_with_metadata
 )
+from utils.fal_helper import (
+    generate_with_fal_text_to_image,
+    is_fal_available
+)
 
 
 class CharacterCreatorAgent(BaseAgent):
@@ -291,7 +295,7 @@ class CharacterCreatorAgent(BaseAgent):
 
     def _generate_character_image(self, char_name: str, char_desc: str) -> Image.Image:
         """
-        Generate character image using Gemini 2.5 Flash Image.
+        Generate character image using configured image provider (Gemini or fal).
 
         Args:
             char_name: Character name
@@ -300,8 +304,6 @@ class CharacterCreatorAgent(BaseAgent):
         Returns:
             PIL Image object
         """
-        from google.genai import types
-
         # Format prompt for character generation
         prompt = f"""
 Generate a high-quality character portrait for:
@@ -321,26 +323,67 @@ Style Requirements:
 Generate a clear, detailed portrait of this character.
 """
 
-        # Generate image
-        response = self.client.client.models.generate_content(
-            model="gemini-2.5-flash-image",
-            contents=[prompt],
-            config=types.GenerateContentConfig(
-                response_modalities=["IMAGE"],
-                image_config=types.ImageConfig(
-                    aspect_ratio="1:1",  # 1024x1024 square
-                ),
-            ),
-        )
+        # Check image provider from config
+        image_provider = self.config.get("image_provider", "gemini").lower()
 
-        # Extract generated image and convert to PIL Image
-        for part in response.parts:
-            if part.inline_data is not None:
-                # Get Gemini SDK Image wrapper
-                gemini_image = part.as_image()
-                # Convert to PIL Image
-                pil_image = Image.open(BytesIO(gemini_image.image_bytes))
-                return pil_image
+        if image_provider == "fal":
+            # Use fal for image generation
+            logger.info(f"Using fal for character image generation: {char_name}")
+
+            if not is_fal_available():
+                logger.warning("fal_client not available, falling back to Gemini")
+                image_provider = "gemini"
+            else:
+                try:
+                    fal_model = self.config.get(
+                        "fal_text_to_image_model",
+                        "fal-ai/bytedance/seedream/v4/text-to-image"
+                    )
+
+                    # Use 1024x1024 for character portraits (1:1 aspect ratio)
+                    pil_image, seed = generate_with_fal_text_to_image(
+                        prompt=prompt,
+                        model=fal_model,
+                        width=1024,
+                        height=1024,
+                        num_images=1,
+                        enable_safety_checker=True,
+                        enhance_prompt_mode="standard"
+                    )
+
+                    logger.info(f"Successfully generated character image with fal (seed: {seed})")
+                    return pil_image
+
+                except Exception as e:
+                    logger.error(f"Failed to generate with fal: {e}, falling back to Gemini")
+                    image_provider = "gemini"
+
+        # Use Gemini for image generation (default or fallback)
+        if image_provider == "gemini":
+            from google.genai import types
+
+            logger.info(f"Using Gemini for character image generation: {char_name}")
+
+            # Generate image
+            response = self.client.client.models.generate_content(
+                model="gemini-2.5-flash-image",
+                contents=[prompt],
+                config=types.GenerateContentConfig(
+                    response_modalities=["IMAGE"],
+                    image_config=types.ImageConfig(
+                        aspect_ratio="1:1",  # 1024x1024 square
+                    ),
+                ),
+            )
+
+            # Extract generated image and convert to PIL Image
+            for part in response.parts:
+                if part.inline_data is not None:
+                    # Get Gemini SDK Image wrapper
+                    gemini_image = part.as_image()
+                    # Convert to PIL Image
+                    pil_image = Image.open(BytesIO(gemini_image.image_bytes))
+                    return pil_image
 
         raise ValueError(f"No image generated for character: {char_name}")
 

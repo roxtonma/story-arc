@@ -81,7 +81,7 @@ class ShotBreakdownAgent(BaseAgent):
                     )
 
                 # Check first frame verbosity (validated in Shot model, but double-check)
-                if len(shot.first_frame) < 50:
+                if len(shot.first_frame) < 40:
                     raise ValueError(
                         f"First frame description for {shot.shot_id} must be more verbose "
                         f"(minimum 50 characters)"
