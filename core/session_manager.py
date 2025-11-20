@@ -159,8 +159,8 @@ class SessionManager:
         if status == "failed":
             session.status = "failed"
         elif status == "completed":
-            # Check if this is the last agent (Phase 2 completion)
-            if agent_name == "agent_9":
+            # Check if this is the last agent (Phase 3 completion)
+            if agent_name == "agent_10":
                 session.status = "completed"
 
         # Save agent output to separate file
@@ -311,8 +311,8 @@ class SessionManager:
         Returns:
             True if can resume, False otherwise
         """
-        # Define agent order (Phase 1 + Phase 2)
-        agent_order = ["agent_1", "agent_2", "agent_3", "agent_4", "agent_5", "agent_6", "agent_7", "agent_8", "agent_9"]
+        # Define agent order (Phase 1 + Phase 2 + Phase 3)
+        agent_order = ["agent_1", "agent_2", "agent_3", "agent_4", "agent_5", "agent_6", "agent_7", "agent_8", "agent_9", "agent_10"]
 
         # Can't resume from an agent before the start agent
         if agent_order.index(agent_name) < agent_order.index(session.start_agent):

@@ -240,6 +240,68 @@ class ChildShotsOutput(BaseModel):
     )
 
 
+# ==================== Agent 10: Video Dialogue Generation ====================
+
+class TimeSegment(BaseModel):
+    """Single time segment in video production timeline."""
+    time_segment: str = Field(..., description="Time range (e.g., '0.0-2.0s')")
+    visual_event: str = Field(..., description="What happens visually")
+    audio_event: str = Field(..., description="Dialogue, voice-over, or silence")
+    constraints_segment: List[str] = Field(..., description="Constraints for this segment")
+
+
+class Cinematography(BaseModel):
+    """Cinematography details for the shot."""
+    shot_type: str = Field(..., description="Type of shot (close-up, medium, wide, etc.)")
+    camera_movement: str = Field(..., description="Camera movement description")
+
+
+class VideoProductionBrief(BaseModel):
+    """Complete production brief for video generation."""
+    title: str = Field(..., description="3-5 word shot title")
+    duration_seconds: int = Field(..., ge=4, le=8, description="Video duration (4, 6, or 8 seconds)")
+    objective: str = Field(..., description="Visual or emotional goal")
+    art_style: str = Field(..., description="Visual and lighting style")
+    temporal_action_plan: List[TimeSegment] = Field(..., description="Timeline of actions")
+    cinematography: Cinematography = Field(..., description="Camera and shot details")
+    atmosphere_and_tone: str = Field(..., description="Visual adjectives only")
+    constraints: List[str] = Field(..., description="Production constraints")
+    video_generation_prompt: str = Field(..., description="Single-line prompt for video API")
+
+
+class ProductionBriefResponse(BaseModel):
+    """Response wrapper for production brief."""
+    video_production_brief: VideoProductionBrief
+
+
+class VideoOutput(BaseModel):
+    """Generated video data for a single shot."""
+    shot_id: str = Field(..., description="Shot identifier")
+    shot_type: Literal["parent", "child"] = Field(..., description="Shot type")
+    image_path: str = Field(..., description="Path to source image")
+    video_url: str = Field(..., description="URL of generated video from FAL")
+    video_path: Optional[str] = Field(None, description="Path to downloaded video file")
+    production_brief_path: str = Field(..., description="Path to production brief JSON")
+    duration_seconds: int = Field(..., ge=4, le=8, description="Video duration (4, 6, or 8 seconds)")
+    video_prompt: str = Field(..., description="Prompt used for video generation")
+    fal_request_id: str = Field(..., description="FAL API request ID")
+    generated_at: str = Field(..., description="Generation timestamp")
+    status: Literal["success", "failed"] = Field(..., description="Generation status")
+    error: Optional[str] = Field(None, description="Error message if failed")
+
+
+class VideoDialogueOutput(BaseModel):
+    """Complete output from Agent 10."""
+    videos: List[VideoOutput] = Field(..., description="All generated videos")
+    total_videos: int = Field(..., description="Total number of videos")
+    successful_videos: int = Field(..., description="Number of successful videos")
+    failed_videos: int = Field(..., description="Number of failed videos")
+    metadata: Optional[Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Additional metadata including session_id, models used"
+    )
+
+
 # ==================== Session Management ====================
 
 class AgentOutput(BaseModel):

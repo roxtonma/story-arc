@@ -131,6 +131,20 @@ agents:
     image_provider: "fal"
     fal_edit_model: "fal-ai/bytedance/seedream/v4/edit"
 
+  agent_10:
+    name: "Video Dialogue Generator"
+    enabled: true
+    temperature: 0.7
+    max_output_tokens: 8192
+    model: "gemini-3-pro-preview"
+    prompt_file: "prompts/agent_10_prompt.txt"
+    # FAL AI Configuration - API key loaded from FAL_KEY environment variable (see .env file)
+    # fal_api_key: "${FAL_KEY}"  # Commented out - using environment variable instead
+    video_resolution: "1080p"  # Options: 720p, 1080p
+    generate_audio: true  # Generate audio with video
+    aspect_ratio: "auto"  # Options: auto, 16:9, 9:16, 1:1
+    fal_timeout: 3600  # Timeout in seconds (60 minutes) for video generation
+
 # Output Settings
 output:
   base_directory: "outputs/projects"

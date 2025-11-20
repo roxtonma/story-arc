@@ -16,6 +16,10 @@ from pathlib import Path
 from io import BytesIO
 import requests
 from PIL import Image
+from dotenv import load_dotenv
+
+# Load .env file to ensure FAL_KEY is available
+load_dotenv()
 
 try:
     import fal_client

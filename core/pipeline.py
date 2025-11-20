@@ -21,6 +21,7 @@ from agents.agent_6_parent_generator import ParentImageGeneratorAgent
 from agents.agent_7_parent_verification import ParentVerificationAgent
 from agents.agent_8_child_generator import ChildImageGeneratorAgent
 from agents.agent_9_child_verification import ChildVerificationAgent
+from agents.agent_10_video_dialogue import VideoDialogueAgent
 
 
 class Pipeline:
@@ -69,12 +70,14 @@ class Pipeline:
         # Agent execution order
         # Phase 1: Script to shot breakdown
         # Phase 2: Image generation (agents 5-9)
+        # Phase 3: Video generation (agent 10)
         self.agent_order = [
             "agent_1", "agent_2", "agent_3", "agent_4",  # Phase 1
-            "agent_5", "agent_6", "agent_7", "agent_8", "agent_9"  # Phase 2
+            "agent_5", "agent_6", "agent_7", "agent_8", "agent_9",  # Phase 2
+            "agent_10"  # Phase 3
         ]
 
-        logger.info("Pipeline initialized successfully (Phase 1 + Phase 2)")
+        logger.info("Pipeline initialized successfully (Phase 1 + Phase 2 + Phase 3)")
 
     def _load_config(self, config_path: str) -> Dict[str, Any]:
         """Load configuration from YAML file."""
@@ -141,8 +144,8 @@ class Pipeline:
         if agent_name not in self.agent_order:
             raise ValueError(f"Unknown agent: {agent_name}")
 
-        if agent_name not in ["agent_5", "agent_6", "agent_7", "agent_8", "agent_9"]:
-            raise ValueError(f"{agent_name} is not a Phase 2 agent")
+        if agent_name not in ["agent_5", "agent_6", "agent_7", "agent_8", "agent_9", "agent_10"]:
+            raise ValueError(f"{agent_name} is not a Phase 2/3 agent")
 
         # Get session directory
         session_dir = Path(self.config["output"]["base_directory"]) / session.session_id
@@ -180,6 +183,13 @@ class Pipeline:
             return ChildVerificationAgent(
                 self.gemini_client,
                 self.config["agents"]["agent_9"],
+                session_dir
+            )
+
+        elif agent_name == "agent_10" and self.config["agents"]["agent_10"]["enabled"]:
+            return VideoDialogueAgent(
+                self.gemini_client,
+                self.config["agents"]["agent_10"],
                 session_dir
             )
 
@@ -234,9 +244,9 @@ class Pipeline:
         """
         max_retries = self.config["app"]["max_retries"]
 
-        # Get agent (Phase 1 from cache, Phase 2 created on-demand)
-        if agent_name in ["agent_5", "agent_6", "agent_7", "agent_8", "agent_9"]:
-            # Phase 2 agent - initialize with session directory
+        # Get agent (Phase 1 from cache, Phase 2/3 created on-demand)
+        if agent_name in ["agent_5", "agent_6", "agent_7", "agent_8", "agent_9", "agent_10"]:
+            # Phase 2/3 agent - initialize with session directory
             agent = self._get_phase2_agent(agent_name, session)
         elif agent_name in self.agents:
             # Phase 1 agent - use cached instance
@@ -470,6 +480,17 @@ class Pipeline:
                 "shot_breakdown": self._get_agent_output(session, "agent_3"),
                 "shot_grouping": self._get_agent_output(session, "agent_4"),
                 "character_grids": self._get_agent_output(session, "agent_5").get("character_grids", [])
+            }
+
+        elif agent_name == "agent_10":
+            # Video Dialogue Generator needs both parent and child shots plus context
+            return {
+                "parent_shots": self._get_agent_output(session, "agent_7").get("parent_shots", []),
+                "child_shots": self._get_agent_output(session, "agent_9").get("child_shots", []),
+                "scene_breakdown": self._get_agent_output(session, "agent_2"),
+                "shot_breakdown": self._get_agent_output(session, "agent_3"),
+                "shot_grouping": self._get_agent_output(session, "agent_4"),
+                "character_data": self._get_agent_output(session, "agent_5")  # Full agent_5 output with characters list
             }
 
         # Phase 1 agents: Get output from previous agent

@@ -1,0 +1,11 @@
+1. Add agent with prompt (for dialogue video creation) - Using 'vid_prompt.txt' as regular prompt with prompt injection ('{}')
+2. Use above prompt with veo3.1 fast - Make process optional rather than instant trigger
+
+
+
+UI: [
+    1. Persistence when switching tabs/agents
+    2. Export result visible inside the app itself
+    3. Retry mechanism for a particular shot with optional user input
+    4. Shot level vid gen
+]

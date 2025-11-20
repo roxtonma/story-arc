@@ -213,7 +213,7 @@ def display_session_results(session: SessionState):
     session_manager = st.session_state.pipeline.session_manager
     session_dir = Path(session_manager.base_directory) / session.session_id
 
-    # Create tabs for each agent (Phase 1 + Phase 2)
+    # Create tabs for each agent (Phase 1 + Phase 2 + Phase 3)
     tabs = st.tabs([
         "Agent 1: Screenplay",
         "Agent 2: Scenes",
@@ -224,6 +224,7 @@ def display_session_results(session: SessionState):
         "Agent 7: Verification",
         "Agent 8: Child Shots",
         "Agent 9: Verification",
+        "Agent 10: Videos",
         "📦 Complete Export"
     ])
 
@@ -519,8 +520,97 @@ def display_session_results(session: SessionState):
         else:
             st.info("Agent 9 not yet executed")
 
-    # Complete Export Tab
+    # Agent 10 Output - Video Dialogue Generator
     with tabs[9]:
+        if "agent_10" in session.agents:
+            agent_output = session.agents["agent_10"]
+            if agent_output.status == "completed":
+                st.markdown("### Generated Videos")
+
+                video_data = agent_output.output_data
+                total_videos = video_data.get("total_videos", 0)
+                successful = video_data.get("successful_videos", 0)
+                failed = video_data.get("failed_videos", 0)
+
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("Total Videos", total_videos)
+                with col2:
+                    st.metric("✓ Successful", successful)
+                with col3:
+                    st.metric("✗ Failed", failed)
+
+                st.divider()
+
+                # Display videos
+                videos = video_data.get("videos", [])
+
+                # Filter by type
+                filter_type = st.radio("Filter by type:", ["All", "Parent Shots", "Child Shots"], horizontal=True)
+
+                if filter_type == "Parent Shots":
+                    videos = [v for v in videos if v.get("shot_type") == "parent"]
+                elif filter_type == "Child Shots":
+                    videos = [v for v in videos if v.get("shot_type") == "child"]
+
+                # Display videos
+                for video in videos:
+                    shot_id = video.get("shot_id")
+                    shot_type = video.get("shot_type", "unknown")
+                    status = video.get("status", "unknown")
+
+                    status_emoji = "✓" if status == "success" else "✗"
+                    type_emoji = "📹" if shot_type == "parent" else "🎬"
+
+                    with st.expander(f"{type_emoji} {status_emoji} {shot_id} ({shot_type})"):
+                        if status == "success":
+                            # Video URL
+                            video_url = video.get("video_url", "")
+                            if video_url:
+                                st.video(video_url)
+                                st.write(f"**Video URL:** {video_url}")
+
+                            # Video details
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.write(f"**Duration:** {video.get('duration_seconds', 'N/A')} seconds")
+                                st.write(f"**Generated:** {video.get('generated_at', 'N/A')}")
+                            with col2:
+                                st.write(f"**FAL Request ID:** {video.get('fal_request_id', 'N/A')}")
+
+                            # Production brief
+                            st.write("**Video Prompt:**")
+                            st.text(video.get('video_prompt', 'N/A'))
+
+                            # Link to brief file
+                            brief_path = session_dir / video.get("production_brief_path", "")
+                            if brief_path.exists():
+                                with open(brief_path, 'r', encoding='utf-8') as f:
+                                    brief_content = f.read()
+                                # Determine language based on file extension
+                                lang = "json" if brief_path.suffix == ".json" else "yaml"
+                                with st.expander("📄 View Full Production Brief"):
+                                    st.code(brief_content, language=lang)
+                        else:
+                            # Failed video
+                            st.error(f"**Error:** {video.get('error', 'Unknown error')}")
+
+                # Download button
+                st.download_button(
+                    "📥 Download Video Metadata",
+                    data=json.dumps(agent_output.output_data, indent=2),
+                    file_name=f"{session.session_id}_videos.json",
+                    mime="application/json"
+                )
+            else:
+                st.warning(f"Agent 10 status: {agent_output.status}")
+                if agent_output.error_message:
+                    st.error(agent_output.error_message)
+        else:
+            st.info("Agent 10 not yet executed (Phase 3)")
+
+    # Complete Export Tab
+    with tabs[10]:
         st.markdown("### 📦 Complete Export")
         st.markdown("Export your Story Architect project in various formats.")
 
@@ -726,7 +816,7 @@ def render_resume_session_page():
 
             resume_from = st.selectbox(
                 "Resume from agent",
-                options=["agent_1", "agent_2", "agent_3", "agent_4", "agent_5", "agent_6", "agent_7", "agent_8", "agent_9"]
+                options=["agent_1", "agent_2", "agent_3", "agent_4", "agent_5", "agent_6", "agent_7", "agent_8", "agent_9", "agent_10"]
             )
 
             if st.button("Resume Pipeline", type="primary"):
