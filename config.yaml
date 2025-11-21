@@ -70,7 +70,7 @@ agents:
     temperature: 0.8
     max_output_tokens: 32000
     # Optional: override Gemini model for this agent only
-    model: "gemini-3-pro-preview"
+    # model: "gemini-3-pro-preview"
     prompt_file: "prompts/agent_1_prompt.txt"
 
   agent_2:
@@ -79,7 +79,7 @@ agents:
     temperature: 0.7
     max_output_tokens: 32000
     # Optional: override Gemini model for this agent only
-    model: "gemini-2.5-pro"
+    # model: "gemini-2.5-pro"
     prompt_file: "prompts/agent_2_prompt.txt"
     output_format: "json"
 
@@ -89,7 +89,7 @@ agents:
     temperature: 0.6
     max_output_tokens: 32000
     # Optional: override Gemini model for this agent only
-    model: "gemini-2.5-pro"
+    # model: "gemini-2.5-pro"
     prompt_file: "prompts/agent_3_prompt.txt"
     output_format: "json"
     strict_json: true
@@ -100,7 +100,7 @@ agents:
     temperature: 0.5
     max_output_tokens: 32000
     # Optional: override Gemini model for this agent only
-    model: "gemini-2.5-pro"
+    # model: "gemini-2.5-pro"
     prompt_file: "prompts/agent_4_prompt.txt"
     output_format: "json"
 
@@ -172,7 +172,7 @@ agents:
     enabled: true
     temperature: 0.7
     max_output_tokens: 8192
-    model: "gemini-3-pro-preview"
+    model: "gemini-2.5-pro"
     prompt_file: "prompts/agent_10_prompt.txt"
     
     # Video Provider: "fal" or "vertex_ai"

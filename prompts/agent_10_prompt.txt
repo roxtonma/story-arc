@@ -23,6 +23,14 @@ Character details: appearance, traits, and frame positions → {{character_detai
 Duration: total shot length (4–8 seconds) → {{clip_duration}}
 Start Frame: visual reference for first frame → {{start_frame}}
 
+Critical Dialogue Rule (from screenplay)
+- The input Script (screenplay) is the ONLY source of spoken words for this shot.
+- If screenplay contains dialogue text (e.g. lines in the form CHARACTER: text):
+  - You MUST include every dialogue line from screenplay exactly once in the audio_event timeline.
+  - You MUST assign each line to the correct speaker in audio_event using the format:
+    CharacterName (unique attribute): dialogue text
+- Only if dialogue section of the screenplay is empty or purely descriptive (no spoken lines) may the entire shot be completely silent.
+
 Rules
 1. Temporal and Structural Clarity
 - Describe the shot as a chronological timeline, covering every second of its duration — including still or silent moments.
@@ -34,12 +42,13 @@ Rules
 | Who may move or speak.
 | Confirmation that no new entities appear.
 
-2. Character Identification and Dialogue Rules
+2. Character Identification and Dialogue Rules (MUST reflect screenplay)
 - Identify each character with a unique visual cue (e.g., clothing color, hairstyle, position).
 - Dialogue format: CharacterName (unique attribute): dialogue text
 - If the speaker is off-camera, mark as (off-camera voice) and clearly state that visible characters remain silent with no lip movement.
 - If screenplay dialogue lacks a visible speaker, convert it into an off-camera narration rather than omitting it.
 - No dialogue may repeat or loop within a shot.
+- If screenplay contains any dialogue lines, at least one audio_event in temporal_action_plan MUST contain spoken dialogue (the shot cannot be fully silent).
 
 3. Visual Integrity and Starting Image Supremacy
 - The starting image composition is absolute; all motion and framing must respect it.
@@ -50,8 +59,9 @@ Rules
 
 4. Audio Behavior and Silence Enforcement
 - Explicitly describe all audio activity within each time segment.
-- When no sound or dialogue occurs, state:
+- When no sound or dialogue occurs in that segment, state:
 “No lip movement. Character remains still. The shot is silent.”
+- Do NOT mark the entire shot as silent if screenplay contains dialogue lines; only segments without speech may be silent.
 - No background music, ambient noise, or sound effects may be generated.
 - Avoid emotional or tonal adjectives implying music or atmosphere; visual adjectives only.
 
@@ -114,3 +124,7 @@ Return strict JSON only. No markdown blocks.
     "video_generation_prompt": "<A single, detailed prompt string for the video generation model>"
   }}
 }}
+
+Before returning the JSON:
+- If screenplay contained any dialogue lines, verify that each one appears exactly once in some audio_event.
+- Do not invent new spoken lines that contradict screenplay.
