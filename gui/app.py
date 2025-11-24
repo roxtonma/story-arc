@@ -225,6 +225,7 @@ def display_session_results(session: SessionState):
         "Agent 8: Child Shots",
         "Agent 9: Verification",
         "Agent 10: Videos",
+        "Agent 11: Final Edit",
         "📦 Complete Export"
     ])
 
@@ -609,8 +610,109 @@ def display_session_results(session: SessionState):
         else:
             st.info("Agent 10 not yet executed (Phase 3)")
 
-    # Complete Export Tab
+    # Agent 11: Final Edit
     with tabs[10]:
+        if "agent_11" in session.agents:
+            agent_output = session.agents["agent_11"]
+            if agent_output.status == "completed":
+                st.markdown("### 🎬 Final Edited Video")
+
+                edit_data = agent_output.output_data
+                total_duration = edit_data.get("total_duration", 0)
+                edit_metadata = edit_data.get("edit_metadata", {})
+
+                # Stats
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Total Duration", f"{total_duration:.1f}s")
+                with col2:
+                    st.metric("Scenes", edit_metadata.get("scenes_edited", 0))
+                with col3:
+                    st.metric("Total Shots", edit_metadata.get("total_shots", 0))
+                with col4:
+                    editing_method = edit_metadata.get("editing_method", "unknown")
+                    method_label = "✨ AI Edit" if editing_method == "gemini_edl" else "🔧 Heuristic"
+                    st.metric("Method", method_label)
+
+                st.divider()
+
+                # Master Video
+                st.markdown("#### 🎥 Master Video (All Scenes)")
+                master_video_path = session_dir / edit_data.get("master_video_path", "")
+                if master_video_path.exists():
+                    st.video(str(master_video_path))
+                    st.caption(f"Duration: {total_duration:.2f} seconds")
+
+                    # Download master video
+                    with open(master_video_path, 'rb') as f:
+                        st.download_button(
+                            "📥 Download Master Video",
+                            data=f,
+                            file_name=f"{session.session_id}_master_final.mp4",
+                            mime="video/mp4",
+                            use_container_width=True
+                        )
+                else:
+                    st.error(f"Master video not found: {edit_data.get('master_video_path')}")
+
+                st.divider()
+
+                # Scene Videos
+                st.markdown("#### 📽️ Scene Videos")
+                scene_videos = edit_data.get("scene_videos", [])
+
+                if scene_videos:
+                    for scene in scene_videos:
+                        scene_id = scene.get("scene_id")
+                        duration = scene.get("duration", 0)
+                        shot_count = scene.get("shot_count", 0)
+
+                        with st.expander(f"🎬 {scene_id} - {duration:.1f}s ({shot_count} shots)"):
+                            scene_video_path = session_dir / scene.get("video_path", "")
+                            if scene_video_path.exists():
+                                st.video(str(scene_video_path))
+                                st.caption(f"Duration: {duration:.2f}s | Shots: {shot_count}")
+
+                                # Download scene video
+                                with open(scene_video_path, 'rb') as f:
+                                    st.download_button(
+                                        f"📥 Download {scene_id}",
+                                        data=f,
+                                        file_name=f"{session.session_id}_{scene_id}.mp4",
+                                        mime="video/mp4",
+                                        key=f"download_{scene_id}"
+                                    )
+                            else:
+                                st.error(f"Scene video not found: {scene.get('video_path')}")
+                else:
+                    st.info("No scene videos available")
+
+                st.divider()
+
+                # Edit Timeline Info
+                st.markdown("#### 📋 Edit Decision List")
+                edit_timeline = edit_data.get("edit_timeline", {})
+
+                with st.expander("View Edit Timeline Details"):
+                    st.json(edit_timeline)
+
+                # Download EDL
+                st.download_button(
+                    "📥 Download Edit Data (JSON)",
+                    data=json.dumps(edit_data, indent=2),
+                    file_name=f"{session.session_id}_edit_output.json",
+                    mime="application/json"
+                )
+
+            else:
+                st.warning(f"Agent 11 status: {agent_output.status}")
+                if agent_output.error_message:
+                    st.error(agent_output.error_message)
+        else:
+            st.info("Agent 11 not yet executed - Run Agent 10 first to generate videos")
+
+    # Complete Export Tab
+    with tabs[11]:
         st.markdown("### 📦 Complete Export")
         st.markdown("Export your Story Architect project in various formats.")
 
@@ -816,7 +918,7 @@ def render_resume_session_page():
 
             resume_from = st.selectbox(
                 "Resume from agent",
-                options=["agent_1", "agent_2", "agent_3", "agent_4", "agent_5", "agent_6", "agent_7", "agent_8", "agent_9", "agent_10"]
+                options=["agent_1", "agent_2", "agent_3", "agent_4", "agent_5", "agent_6", "agent_7", "agent_8", "agent_9", "agent_10", "agent_11"]
             )
 
             if st.button("Resume Pipeline", type="primary"):

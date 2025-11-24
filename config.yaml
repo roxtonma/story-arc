@@ -100,7 +100,7 @@ agents:
     temperature: 0.5
     max_output_tokens: 32000
     # Optional: override Gemini model for this agent only
-    # model: "gemini-2.5-pro"
+    model: "gemini-2.5-pro"
     prompt_file: "prompts/agent_4_prompt.txt"
     output_format: "json"
 
@@ -192,6 +192,54 @@ agents:
     # Common settings (both providers)
     aspect_ratio: "auto"  # Options: auto, 16:9, 9:16, 1:1 (auto = detect from image)
     max_image_size_mb: 7.0  # Maximum image size for base64 encoding (Vertex AI)
+
+  agent_11:
+    name: "Intelligent Video Editor"
+    enabled: true
+    temperature: 0.5
+    max_output_tokens: 32000
+    model: "gemini-2.5-flash"  # Use fast model for EDL generation
+    prompt_file: "prompts/agent_11_prompt.txt"
+
+    # FFmpeg Configuration
+    ffmpeg_path: "ffmpeg"  # or full path: "C:/path/to/ffmpeg.exe"
+    ffprobe_path: "ffprobe"  # Used for video duration detection
+    output_codec: "libx264"
+    output_preset: "medium"  # Options: ultrafast, fast, medium, slow, veryslow
+    output_crf: 23  # Quality (0-51, lower = better quality, 23 is default)
+    audio_codec: "aac"
+    audio_bitrate: "192k"
+
+    # WhisperX Configuration
+    whisperx_model: "base.en"  # Options: tiny.en, base.en, small.en, medium.en, large-v2
+    whisperx_device: "cpu"  # Options: cpu, cuda (if GPU available)
+    whisperx_batch_size: 8
+    whisperx_compute_type: "int8"  # Options: int8, float16, float32
+
+    # Editing Rules
+    default_transition_duration: 0.5  # seconds for simple cuts
+    scene_fade_duration: 1.0  # seconds for scene-to-scene transitions
+    min_shot_duration: 1.5  # minimum shot length in seconds
+    max_shot_duration: 12.0  # maximum shot length in seconds
+    trim_silence_threshold: 0.3  # trim silence longer than this at start/end
+
+    # Audio Mixing Configuration
+    enable_audio_mixing: true
+    audio_fade_in: 0.2  # seconds
+    audio_fade_out: 0.2  # seconds
+    normalize_audio: true
+    j_cut_max_offset: 1.0  # max seconds audio can start before video
+    l_cut_max_offset: 1.0  # max seconds audio can continue after video
+
+    # Output Settings (use "auto" to match input video properties)
+    output_resolution: "auto"  # Match input video resolution (or specify like "1920x1080")
+    output_fps: "auto"  # Match input video fps (or specify like 24, 30, 60)
+    output_aspect_ratio: "auto"  # Match input video aspect ratio (or specify like "16:9")
+
+    # Editing Strategy
+    skip_gemini_edl: true  # Set to true to bypass Gemini and use heuristic editing directly
+    max_edl_retries: 3  # retries for Gemini EDL generation (if skip_gemini_edl is false)
+    use_heuristic_fallback: true  # use simple editing if Gemini fails
 
 # Output Settings
 output:
