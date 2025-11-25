@@ -302,6 +302,125 @@ class VideoDialogueOutput(BaseModel):
     )
 
 
+# ==================== Agent 11: Video Editing ====================
+
+class EditShot(BaseModel):
+    """Edit instructions for a single shot in the Edit Decision List."""
+    shot_id: str = Field(..., description="Shot identifier")
+    video_path: str = Field(..., description="Relative path to video file")
+    edit_type: Literal["hard_start", "j_cut", "l_cut", "hard_cut"] = Field(
+        ...,
+        description="Type of edit: hard_start (scene start), j_cut (audio leads), l_cut (audio lags), hard_cut (simple)"
+    )
+    trim_start: float = Field(..., ge=0.0, description="Seconds to trim from start of video")
+    trim_end: float = Field(..., gt=0.0, description="End timestamp in source video (not duration)")
+    audio_start_offset: float = Field(
+        default=0.0,
+        description="Audio offset in seconds: negative=J-cut (audio early), positive=L-cut (audio late), 0=sync"
+    )
+    transition: Literal["cut", "fade", "dissolve"] = Field(
+        default="cut",
+        description="Transition type (currently only 'cut' is implemented)"
+    )
+    rationale: str = Field(..., description="Brief explanation of edit decision")
+
+    @validator("trim_end")
+    def validate_trim_end_gt_start(cls, v, values):
+        """Ensure trim_end is greater than trim_start."""
+        if "trim_start" in values and v <= values["trim_start"]:
+            raise ValueError("trim_end must be greater than trim_start")
+        return v
+
+    @validator("audio_start_offset")
+    def validate_audio_offset_rules(cls, v, values):
+        """Validate audio offset rules based on edit_type."""
+        if "edit_type" in values:
+            edit_type = values["edit_type"]
+            if edit_type in ["hard_start", "hard_cut"] and abs(v) > 0.01:
+                raise ValueError(f"{edit_type} must have audio_start_offset of 0.0")
+            if edit_type == "j_cut" and v >= 0.0:
+                raise ValueError("j_cut requires negative audio_start_offset")
+            if edit_type == "l_cut" and v <= 0.0:
+                raise ValueError("l_cut requires positive audio_start_offset")
+        return v
+
+
+class SceneEdit(BaseModel):
+    """Edit instructions for a complete scene."""
+    scene_id: str = Field(..., description="Scene identifier (e.g., 'SCENE_1')")
+    shots: List[EditShot] = Field(..., description="Ordered list of shot edits for this scene")
+
+    @validator("shots")
+    def validate_first_shot_is_hard_start(cls, v):
+        """Ensure first shot of scene uses hard_start."""
+        if v and v[0].edit_type != "hard_start":
+            raise ValueError(
+                f"First shot of scene must use edit_type='hard_start', "
+                f"got '{v[0].edit_type}'"
+            )
+        return v
+
+
+class EditPlan(BaseModel):
+    """Complete edit plan from Gemini."""
+    scenes: List[SceneEdit] = Field(..., description="List of scene edit instructions")
+    total_estimated_duration: Optional[float] = Field(
+        None,
+        description="Estimated total duration after editing (seconds)"
+    )
+    scene_count: int = Field(..., description="Number of scenes")
+    editing_notes: Optional[str] = Field(
+        None,
+        description="General notes about editing approach"
+    )
+
+
+class EditTimeline(BaseModel):
+    """Complete edit timeline/EDL structure."""
+    edit_plan: EditPlan = Field(..., description="The edit plan from Gemini")
+    editing_method: Literal["gemini_edl", "heuristic_fallback"] = Field(
+        default="gemini_edl",
+        description="Method used to generate EDL"
+    )
+    gemini_attempt: Optional[int] = Field(
+        None,
+        description="Gemini attempt number if using gemini_edl method"
+    )
+
+
+class SceneVideo(BaseModel):
+    """Metadata for an edited scene video."""
+    scene_id: str = Field(..., description="Scene identifier")
+    video_path: str = Field(..., description="Relative path to edited scene video")
+    shot_count: int = Field(..., ge=1, description="Number of shots in this scene")
+    duration: float = Field(..., gt=0.0, description="Scene duration in seconds")
+
+
+class VideoEditOutput(BaseModel):
+    """Complete output from Agent 11."""
+    master_video_path: str = Field(
+        ...,
+        description="Relative path to master video (all scenes combined)"
+    )
+    scene_videos: List[SceneVideo] = Field(
+        ...,
+        description="List of individual scene videos"
+    )
+    edit_timeline: EditTimeline = Field(
+        ...,
+        description="Complete edit decision list used"
+    )
+    total_duration: float = Field(
+        ...,
+        gt=0.0,
+        description="Total duration of master video in seconds"
+    )
+    edit_metadata: Dict[str, Any] = Field(
+        ...,
+        description="Editing metadata (scenes_edited, total_shots, editing_method, etc.)"
+    )
+
+
 # ==================== Session Management ====================
 
 class AgentOutput(BaseModel):
