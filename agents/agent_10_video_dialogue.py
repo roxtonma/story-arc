@@ -468,6 +468,142 @@ class VideoDialogueAgent(BaseAgent):
 
         return summary
 
+    def generate_single_shot_video(
+        self,
+        shot_id: str,
+        shot_type: str,
+        input_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Generate video for a single shot (for UI shot-level generation).
+
+        Args:
+            shot_id: Shot identifier (e.g., "SHOT_1_1")
+            shot_type: "parent" or "child"
+            input_data: Complete input data from session (containing all agent outputs)
+
+        Returns:
+            Video generation result for the single shot
+
+        Raises:
+            ValueError: If shot not found or invalid input
+        """
+        logger.info(f"{self.agent_name}: Generating single shot video for {shot_id} ({shot_type})")
+
+        # Extract required data from input
+        parent_shots = input_data.get("parent_shots", [])
+        child_shots = input_data.get("child_shots", [])
+        shot_breakdown = input_data.get("shot_breakdown", {})
+        character_data = input_data.get("character_data", {})
+
+        # Create lookup tables
+        shots_by_id = {}
+        if shot_breakdown.get("shots"):
+            for shot in shot_breakdown["shots"]:
+                shots_by_id[shot["shot_id"]] = shot
+
+        characters_by_name = {}
+        if character_data.get("characters"):
+            for char in character_data["characters"]:
+                characters_by_name[char["name"]] = char
+
+        # Find the target shot
+        target_shot = None
+        if shot_type == "parent":
+            target_shot = next((s for s in parent_shots if s["shot_id"] == shot_id), None)
+        elif shot_type == "child":
+            target_shot = next((s for s in child_shots if s["shot_id"] == shot_id), None)
+        else:
+            raise ValueError(f"Invalid shot_type: {shot_type}. Must be 'parent' or 'child'")
+
+        if not target_shot:
+            raise ValueError(f"Shot {shot_id} not found in {shot_type} shots")
+
+        # Generate video for this shot
+        try:
+            video_data = self._generate_video_for_shot(
+                shot=target_shot,
+                shot_type=shot_type,
+                shots_by_id=shots_by_id,
+                characters_by_name=characters_by_name
+            )
+
+            # Update metadata with single shot
+            self._update_single_shot_metadata(video_data)
+
+            logger.info(f"{self.agent_name}: Successfully generated video for {shot_id}")
+            return video_data
+
+        except Exception as e:
+            logger.error(f"{self.agent_name}: Failed to generate video for {shot_id}: {str(e)}")
+            # Return failed video data
+            failed_video_data = {
+                "shot_id": shot_id,
+                "shot_type": shot_type,
+                "status": "failed",
+                "error": str(e),
+                "generated_at": datetime.now().isoformat()
+            }
+            self._update_single_shot_metadata(failed_video_data)
+            return failed_video_data
+
+    def _update_single_shot_metadata(self, video_data: Dict[str, Any]) -> None:
+        """
+        Update metadata.json with a single shot video (used for UI-triggered generation).
+
+        Args:
+            video_data: Video result data for single shot
+        """
+        metadata_path = self.videos_dir / "metadata.json"
+
+        # Read current metadata or create new
+        if metadata_path.exists():
+            with open(metadata_path, 'r', encoding='utf-8') as f:
+                metadata = json.load(f)
+        else:
+            # Initialize metadata if doesn't exist
+            metadata = {
+                "videos": [],
+                "total_videos": 0,
+                "successful_videos": 0,
+                "failed_videos": 0,
+                "status": "in_progress",
+                "metadata": {
+                    "session_id": self.session_dir.name,
+                    "video_provider": self.video_provider
+                }
+            }
+
+        # Check if this shot already exists in metadata
+        existing_index = None
+        for i, video in enumerate(metadata["videos"]):
+            if video.get("shot_id") == video_data.get("shot_id"):
+                existing_index = i
+                break
+
+        # Update or append
+        if existing_index is not None:
+            # Replace existing entry
+            metadata["videos"][existing_index] = video_data
+            logger.info(f"Updated existing video entry for {video_data.get('shot_id')}")
+        else:
+            # Add new entry
+            metadata["videos"].append(video_data)
+            metadata["total_videos"] = len(metadata["videos"])
+            logger.info(f"Added new video entry for {video_data.get('shot_id')}")
+
+        # Recalculate success/failure counts
+        successful = sum(1 for v in metadata["videos"] if v.get("status") != "failed")
+        failed = sum(1 for v in metadata["videos"] if v.get("status") == "failed")
+        metadata["successful_videos"] = successful
+        metadata["failed_videos"] = failed
+
+        # Atomic write
+        temp_path = metadata_path.with_suffix('.tmp')
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            json.dump(metadata, f, indent=2)
+        temp_path.replace(metadata_path)
+
     def _download_video(self, video_url: str, shot_id: str) -> str:
         """
         Download video file from FAL URL to local videos/ directory.

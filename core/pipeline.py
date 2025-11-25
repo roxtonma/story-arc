@@ -376,6 +376,173 @@ class Pipeline:
 
         return session
 
+    def _phase_1_complete(self, session: SessionState) -> bool:
+        """Check if Phase 1 (Agents 1-4) is complete."""
+        return all(
+            f"agent_{i}" in session.agents and
+            session.agents[f"agent_{i}"].status == "completed"
+            for i in range(1, 5)
+        )
+
+    def _phase_2_complete(self, session: SessionState) -> bool:
+        """Check if Phase 2 (Agents 5-9) is complete."""
+        return all(
+            f"agent_{i}" in session.agents and
+            session.agents[f"agent_{i}"].status == "completed"
+            for i in range(5, 10)
+        )
+
+    def _phase_3_complete(self, session: SessionState) -> bool:
+        """Check if Phase 3 (Agent 10) is complete."""
+        return "agent_10" in session.agents and \
+               session.agents["agent_10"].status == "completed"
+
+    def _run_phase(
+        self,
+        session: SessionState,
+        agents: list,
+        progress_callback: Optional[Callable] = None
+    ) -> SessionState:
+        """
+        Internal method to run a list of agents sequentially.
+
+        Args:
+            session: Session state
+            agents: List of agent names to run
+            progress_callback: Optional callback for progress updates
+
+        Returns:
+            Updated session state
+        """
+        for i, agent_name in enumerate(agents):
+            # Skip already completed agents
+            if agent_name in session.agents and session.agents[agent_name].status == "completed":
+                logger.info(f"Skipping {agent_name} (already completed)")
+                continue
+
+            # Run agent
+            try:
+                if progress_callback:
+                    progress = (i / len(agents))
+                    progress_callback(
+                        f"Phase progress: {i}/{len(agents)} agents completed",
+                        progress
+                    )
+
+                session = self.run_agent(session, agent_name, progress_callback)
+
+            except Exception as e:
+                logger.error(f"Phase failed at {agent_name}: {str(e)}")
+                session.status = "failed"
+                self.session_manager.save_session(session)
+                raise
+
+        return session
+
+    def run_phase_1(
+        self,
+        session: SessionState,
+        progress_callback: Optional[Callable] = None
+    ) -> SessionState:
+        """
+        Run Phase 1: Script to Shot (Agents 1-4).
+
+        Args:
+            session: Session state
+            progress_callback: Optional callback for progress updates
+
+        Returns:
+            Updated session state with Phase 1 completed
+        """
+        logger.info(f"Running Phase 1 for session: {session.session_id}")
+
+        phase_agents = ["agent_1", "agent_2", "agent_3", "agent_4"]
+        session = self._run_phase(session, phase_agents, progress_callback)
+
+        logger.info(f"Phase 1 completed for session: {session.session_id}")
+
+        if progress_callback:
+            progress_callback("Phase 1 completed successfully", 1.0)
+
+        return session
+
+    def run_phase_2(
+        self,
+        session: SessionState,
+        progress_callback: Optional[Callable] = None
+    ) -> SessionState:
+        """
+        Run Phase 2: Image Generation (Agents 5-9).
+
+        Requires Phase 1 to be completed first.
+
+        Args:
+            session: Session state
+            progress_callback: Optional callback for progress updates
+
+        Returns:
+            Updated session state with Phase 2 completed
+
+        Raises:
+            ValueError: If Phase 1 is not complete
+        """
+        logger.info(f"Running Phase 2 for session: {session.session_id}")
+
+        # Verify Phase 1 is complete
+        if not self._phase_1_complete(session):
+            raise ValueError("Phase 1 must be completed before running Phase 2")
+
+        phase_agents = ["agent_5", "agent_6", "agent_7", "agent_8", "agent_9"]
+        session = self._run_phase(session, phase_agents, progress_callback)
+
+        logger.info(f"Phase 2 completed for session: {session.session_id}")
+
+        if progress_callback:
+            progress_callback("Phase 2 completed successfully", 1.0)
+
+        return session
+
+    def run_phase_3(
+        self,
+        session: SessionState,
+        progress_callback: Optional[Callable] = None
+    ) -> SessionState:
+        """
+        Run Phase 3: Video Generation (Agent 10).
+
+        Requires Phase 2 to be completed first.
+
+        Args:
+            session: Session state
+            progress_callback: Optional callback for progress updates
+
+        Returns:
+            Updated session state with Phase 3 completed
+
+        Raises:
+            ValueError: If Phase 2 is not complete
+        """
+        logger.info(f"Running Phase 3 for session: {session.session_id}")
+
+        # Verify Phase 2 is complete
+        if not self._phase_2_complete(session):
+            raise ValueError("Phase 2 must be completed before running Phase 3")
+
+        phase_agents = ["agent_10"]
+        session = self._run_phase(session, phase_agents, progress_callback)
+
+        # Mark as completed if all phases done
+        if self._phase_1_complete(session) and self._phase_2_complete(session) and self._phase_3_complete(session):
+            session.status = "completed"
+            self.session_manager.save_session(session)
+
+        logger.info(f"Phase 3 completed for session: {session.session_id}")
+
+        if progress_callback:
+            progress_callback("Phase 3 completed successfully", 1.0)
+
+        return session
+
     def resume_from_agent(
         self,
         session: SessionState,
@@ -417,6 +584,147 @@ class Pipeline:
 
         logger.info(f"Resumed pipeline completed for session: {session.session_id}")
         return session
+
+    def retry_agent(
+        self,
+        session: SessionState,
+        agent_name: str,
+        modified_input: Optional[Any] = None,
+        progress_callback: Optional[Callable] = None
+    ) -> SessionState:
+        """
+        Retry a failed or completed agent with optional modified input.
+
+        Args:
+            session: Session state
+            agent_name: Agent to retry
+            modified_input: Optional modified input data (if None, uses original input)
+            progress_callback: Optional callback for progress updates
+
+        Returns:
+            Updated session state with retried agent
+
+        Raises:
+            ValueError: If agent doesn't exist or dependencies not met
+        """
+        logger.info(f"Retrying {agent_name} for session: {session.session_id}")
+
+        # Validate agent exists
+        if agent_name not in self.agent_order:
+            raise ValueError(f"Invalid agent name: {agent_name}")
+
+        # Reset agent status to pending
+        if agent_name in session.agents:
+            session.agents[agent_name].status = "pending"
+            session.agents[agent_name].error_message = None
+            session.agents[agent_name].retry_count = 0
+
+        # Get input - use modified input if provided, otherwise use default
+        if modified_input is not None:
+            input_data = modified_input
+            logger.info(f"Using modified input for {agent_name}")
+        else:
+            input_data = self._get_agent_input(session, agent_name)
+            logger.info(f"Using original input for {agent_name}")
+
+        # Save session before retry
+        self.session_manager.save_session(session)
+
+        # Run the agent
+        try:
+            if progress_callback:
+                progress_callback(f"Retrying {agent_name}...", 0.0)
+
+            session = self.run_agent(session, agent_name, progress_callback)
+
+            if progress_callback:
+                progress_callback(f"{agent_name} retry completed successfully", 1.0)
+
+            logger.info(f"Successfully retried {agent_name}")
+
+        except Exception as e:
+            logger.error(f"Failed to retry {agent_name}: {str(e)}")
+            if progress_callback:
+                progress_callback(f"{agent_name} retry failed: {str(e)}", 1.0, error=True)
+            raise
+
+        return session
+
+    def generate_single_shot_video(
+        self,
+        session: SessionState,
+        shot_id: str,
+        shot_type: str,
+        progress_callback: Optional[Callable] = None
+    ) -> Dict[str, Any]:
+        """
+        Generate video for a single shot without running full Agent 10.
+
+        Args:
+            session: Session state (must have Phase 2 completed)
+            shot_id: Shot identifier (e.g., "SHOT_1_1")
+            shot_type: "parent" or "child"
+            progress_callback: Optional callback for progress updates
+
+        Returns:
+            Video generation result for the shot
+
+        Raises:
+            ValueError: If Phase 2 not complete or shot not found
+        """
+        logger.info(f"Generating video for single shot: {shot_id} ({shot_type})")
+
+        # Verify Phase 2 is complete
+        if not self._phase_2_complete(session):
+            raise ValueError("Phase 2 (image generation) must be completed before generating videos")
+
+        # Get session directory
+        session_dir = Path(self.session_manager.base_directory) / session.session_id
+
+        # Prepare input data from session
+        input_data = {
+            "parent_shots": session.agents.get("agent_7", {}).output_data.get("parent_shots", []) if "agent_7" in session.agents else [],
+            "child_shots": session.agents.get("agent_9", {}).output_data.get("child_shots", []) if "agent_9" in session.agents else [],
+            "shot_breakdown": session.agents.get("agent_3", {}).output_data if "agent_3" in session.agents else {},
+            "character_data": session.agents.get("agent_5", {}).output_data if "agent_5" in session.agents else {}
+        }
+
+        # Progress update
+        if progress_callback:
+            progress_callback(f"Generating video for {shot_id}...", 0.1)
+
+        # Import and instantiate Agent 10
+        from agents.agent_10_video_dialogue import VideoDialogueAgent
+
+        agent_config = self.config.get("agents", {}).get("agent_10", {})
+        agent = VideoDialogueAgent(
+            gemini_client=self.gemini_client,
+            config=agent_config,
+            session_dir=session_dir
+        )
+
+        # Generate video
+        try:
+            video_data = agent.generate_single_shot_video(
+                shot_id=shot_id,
+                shot_type=shot_type,
+                input_data=input_data
+            )
+
+            if progress_callback:
+                if video_data.get("status") == "failed":
+                    progress_callback(f"Video generation failed: {video_data.get('error')}", 1.0, error=True)
+                else:
+                    progress_callback(f"Video generated successfully for {shot_id}", 1.0)
+
+            logger.info(f"Successfully generated video for {shot_id}")
+            return video_data
+
+        except Exception as e:
+            logger.error(f"Failed to generate video for {shot_id}: {str(e)}")
+            if progress_callback:
+                progress_callback(f"Failed to generate video: {str(e)}", 1.0, error=True)
+            raise
 
     def _get_agent_input(self, session: SessionState, agent_name: str) -> Any:
         """

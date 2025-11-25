@@ -19,13 +19,36 @@ from loguru import logger
 from core.pipeline import Pipeline
 from core.validators import SessionState
 from core.export import generate_notion_markdown
+from gui.session_state_manager import SessionStateManager
 
-# Load environment variables
+# Load environment variables (fallback for local development)
 load_dotenv()
 
 # Configure logging
 logger.remove()  # Remove default handler
 logger.add(sys.stderr, level="INFO")
+
+
+def get_secret(key: str, default=None):
+    """
+    Get secret from Streamlit secrets (priority) or environment variables (fallback).
+
+    Args:
+        key: The secret key to retrieve
+        default: Default value if not found
+
+    Returns:
+        Secret value or default
+    """
+    # Try Streamlit secrets first (for Cloud deployment)
+    try:
+        if key in st.secrets:
+            return st.secrets[key]
+    except (FileNotFoundError, KeyError):
+        pass
+
+    # Fallback to environment variables (for local development)
+    return os.getenv(key, default)
 
 
 # Page configuration
@@ -36,21 +59,124 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# Custom CSS for production tool aesthetic
+st.markdown("""
+<style>
+    /* Global styling */
+    .stApp {
+        background-color: #0A0A0F;
+    }
+
+    /* Improve tab styling */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 8px;
+        background-color: #13131A;
+        padding: 8px;
+        border-radius: 8px;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        background-color: #1E1E2E;
+        border-radius: 6px;
+        padding: 8px 16px;
+        color: #A0A0A8;
+        border: 1px solid transparent;
+        transition: all 0.2s ease;
+    }
+
+    .stTabs [aria-selected="true"] {
+        background-color: #A855F7;
+        color: #FFFFFF;
+        border-color: #A855F7;
+    }
+
+    /* Enhance expanders */
+    .streamlit-expanderHeader {
+        background-color: #1E1E2E;
+        border-radius: 6px;
+        border: 1px solid #2A2A38;
+        transition: all 0.2s ease;
+    }
+
+    .streamlit-expanderHeader:hover {
+        border-color: #A855F7;
+        background-color: #252530;
+    }
+
+    /* Button styling */
+    .stButton > button {
+        border-radius: 6px;
+        border: 1px solid #2A2A38;
+        transition: all 0.2s ease;
+        font-weight: 500;
+    }
+
+    .stButton > button:hover {
+        border-color: #A855F7;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(168, 85, 247, 0.2);
+    }
+
+    /* Primary button enhancement */
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #A855F7 0%, #8B5CF6 100%);
+        border: none;
+    }
+
+    /* Success/error/warning messages */
+    .stSuccess, .stError, .stWarning, .stInfo {
+        border-radius: 6px;
+        border-left-width: 4px;
+    }
+
+    /* Image and Video containers */
+    .stImage, .stVideo {
+        border-radius: 8px;
+        overflow: hidden;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    }
+
+    /* Progress bar */
+    .stProgress > div > div > div > div {
+        background: linear-gradient(90deg, #A855F7 0%, #8B5CF6 100%);
+    }
+
+    /* Sidebar styling */
+    [data-testid="stSidebar"] {
+        background-color: #0D0D12;
+        border-right: 1px solid #2A2A38;
+    }
+
+    /* Text area improvements */
+    .stTextArea textarea {
+        background-color: #1E1E2E;
+        border: 1px solid #2A2A38;
+        border-radius: 6px;
+        color: #F5F5F7;
+    }
+
+    .stTextArea textarea:focus {
+        border-color: #A855F7;
+        box-shadow: 0 0 0 1px #A855F7;
+    }
+
+    /* JSON viewer */
+    .stJson {
+        background-color: #1E1E2E;
+        border-radius: 6px;
+        border: 1px solid #2A2A38;
+    }
+
+    /* Hide Streamlit branding */
+    #MainMenu {visibility: hidden;}
+    footer {visibility: hidden;}
+</style>
+""", unsafe_allow_html=True)
+
 
 def init_session_state():
-    """Initialize Streamlit session state."""
-    if "pipeline" not in st.session_state:
-        try:
-            st.session_state.pipeline = Pipeline()
-        except Exception as e:
-            st.error(f"Failed to initialize pipeline: {str(e)}")
-            st.stop()
-
-    if "current_session" not in st.session_state:
-        st.session_state.current_session = None
-
-    if "running" not in st.session_state:
-        st.session_state.running = False
+    """Initialize Streamlit session state using SessionStateManager."""
+    SessionStateManager.init()
 
 
 def main():
@@ -58,36 +184,267 @@ def main():
     init_session_state()
 
     st.title("🎬 Story Architect")
-    st.markdown("*AI-Powered Multi-Agent System for Script-to-Shot Conversion*")
+    st.markdown("*AI-Powered Multi-Agent System for Story-to-Video Generation*")
 
     # Sidebar
     with st.sidebar:
-        st.header("Navigation")
-
-        page = st.radio(
-            "Select Page",
-            ["New Project", "Resume Session", "Session History"],
-            key="page_selector"
-        )
-
-        st.divider()
+        st.header("Quick Info")
 
         # API Key Status
         st.subheader("API Status")
-        api_key = os.getenv("GOOGLE_API_KEY")
-        if api_key:
-            st.success("✓ API Key Configured")
-        else:
-            st.error("✗ API Key Not Found")
-            st.info("Set GOOGLE_API_KEY in .env file")
 
-    # Main content
-    if page == "New Project":
+        # Check for Gemini API Key
+        gemini_key = get_secret("GEMINI_API_KEY") or get_secret("GOOGLE_API_KEY")
+        if gemini_key:
+            st.success("✓ Gemini API")
+        else:
+            st.error("✗ Gemini API")
+
+        # Check for FAL API Key
+        fal_key = get_secret("FAL_KEY")
+        if fal_key:
+            st.success("✓ FAL.ai API")
+        else:
+            st.warning("✗ FAL.ai API")
+
+        # Show configuration source
+        try:
+            if "GEMINI_API_KEY" in st.secrets or "GOOGLE_API_KEY" in st.secrets:
+                st.caption("🔐 Streamlit Secrets")
+            else:
+                st.caption("📁 .env file")
+        except FileNotFoundError:
+            st.caption("📁 .env file")
+
+        st.divider()
+
+        # Active Session Info
+        active_session = SessionStateManager.get_active_session()
+        if active_session:
+            st.subheader("Active Session")
+            st.caption(f"**{active_session.session_name}**")
+            st.caption(f"ID: {active_session.session_id[:8]}...")
+            st.caption(f"Status: {active_session.status}")
+
+            # Phase status indicators
+            pipeline = SessionStateManager.get_pipeline()
+
+            phase1_done = all(
+                f"agent_{i}" in active_session.agents and
+                active_session.agents[f"agent_{i}"].status == "completed"
+                for i in range(1, 5)
+            )
+            phase2_done = all(
+                f"agent_{i}" in active_session.agents and
+                active_session.agents[f"agent_{i}"].status == "completed"
+                for i in range(5, 10)
+            )
+            phase3_done = "agent_10" in active_session.agents and \
+                         active_session.agents["agent_10"].status == "completed"
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.caption("📝" if phase1_done else "⏳")
+            with col2:
+                st.caption("🎨" if phase2_done else "⏳")
+            with col3:
+                st.caption("🎬" if phase3_done else "⏳")
+
+    # Main content - Tab navigation
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "🏠 Home",
+        "✨ New Project",
+        "⏯️ Resume Session",
+        "📚 History",
+        "⚙️ Settings"
+    ])
+
+    with tab1:
+        render_home_page()
+
+    with tab2:
         render_new_project_page()
-    elif page == "Resume Session":
+
+    with tab3:
         render_resume_session_page()
-    elif page == "Session History":
+
+    with tab4:
         render_session_history_page()
+
+    with tab5:
+        render_configuration_page()
+
+
+def render_home_page():
+    """Render the home/welcome page."""
+    st.header("Welcome to Story Architect")
+
+    st.markdown("""
+    ### Transform Stories into Cinematic Visuals
+
+    Story Architect is an AI-powered system that converts story concepts into complete visual productions:
+
+    **📝 Phase 1: Script-to-Shot**
+    - Generate screenplay from story concept
+    - Break down into detailed scenes
+    - Create shot-by-shot breakdown
+    - Optimize shot hierarchy
+
+    **🎨 Phase 2: Image Generation**
+    - Create consistent characters
+    - Generate parent shot images
+    - Create child shot variations
+    - AI-powered verification
+
+    **🎬 Phase 3: Video Generation**
+    - Transform images into videos
+    - Production brief generation
+    - 4-8 second video clips
+
+    ---
+
+    ### Quick Start
+
+    1. **New Project** - Start with a story concept or screenplay
+    2. **Configure** - Ensure your API keys are set (check sidebar)
+    3. **Generate** - Let the pipeline create your visual story
+    4. **Export** - Download in HTML, Notion, or complete archive
+
+    ---
+
+    ### System Requirements
+
+    **Required APIs:**
+    - ✓ Google Gemini API (text generation)
+    - ✓ FAL.ai API (image/video generation)
+
+    **Optional:**
+    - Google Cloud Vertex AI (enterprise deployment)
+
+    Ready to begin? Click **New Project** in the sidebar!
+    """)
+
+    # Quick stats if there are sessions
+    pipeline = SessionStateManager.get_pipeline()
+    sessions = pipeline.list_sessions(limit=5)
+    if sessions:
+        st.divider()
+        st.subheader("Recent Activity")
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Total Sessions", len(sessions))
+        with col2:
+            completed = sum(1 for s in sessions if s['status'] == 'completed')
+            st.metric("Completed", completed)
+        with col3:
+            in_progress = sum(1 for s in sessions if s['status'] == 'running')
+            st.metric("In Progress", in_progress)
+
+
+def render_configuration_page():
+    """Render the configuration management page."""
+    st.header("⚙️ Configuration")
+
+    st.markdown("""
+    Manage your API keys and system configuration. Keys can be set in:
+    - `.streamlit/secrets.toml` (local development)
+    - Streamlit Cloud Secrets (deployed apps)
+    - `.env` file (fallback)
+    """)
+
+    st.divider()
+
+    # API Keys Section
+    st.subheader("API Keys Status")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.markdown("#### Google Gemini")
+        gemini_key = get_secret("GEMINI_API_KEY") or get_secret("GOOGLE_API_KEY")
+        if gemini_key:
+            st.success("✓ Configured")
+            masked_key = f"{gemini_key[:8]}...{gemini_key[-4:]}" if len(gemini_key) > 12 else "***"
+            st.code(masked_key)
+        else:
+            st.error("✗ Not Found")
+            st.markdown("[Get API Key →](https://aistudio.google.com/apikey)")
+
+    with col2:
+        st.markdown("#### FAL.ai")
+        fal_key = get_secret("FAL_KEY")
+        if fal_key:
+            st.success("✓ Configured")
+            masked_key = f"{fal_key[:8]}...{fal_key[-4:]}" if len(fal_key) > 12 else "***"
+            st.code(masked_key)
+        else:
+            st.error("✗ Not Found")
+            st.markdown("[Get API Key →](https://fal.ai/dashboard/keys)")
+
+    st.divider()
+
+    # Google Cloud / Vertex AI
+    st.subheader("Google Cloud / Vertex AI (Optional)")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        project = get_secret("GOOGLE_CLOUD_PROJECT")
+        if project:
+            st.success("✓ Project ID")
+            st.code(project)
+        else:
+            st.info("Not configured")
+
+    with col2:
+        location = get_secret("GOOGLE_CLOUD_LOCATION")
+        if location:
+            st.success("✓ Location")
+            st.code(location)
+        else:
+            st.info("Not configured")
+
+    with col3:
+        credentials = get_secret("GOOGLE_APPLICATION_CREDENTIALS")
+        if credentials:
+            st.success("✓ Credentials File")
+            st.code(credentials)
+        else:
+            st.info("Not configured")
+
+    st.divider()
+
+    # Configuration Guide
+    with st.expander("📖 How to Configure Secrets"):
+        st.markdown("""
+        ### Local Development
+
+        Create `.streamlit/secrets.toml` in your project root:
+
+        ```toml
+        GEMINI_API_KEY = "your-key-here"
+        FAL_KEY = "your-key-here"
+        ```
+
+        ### Streamlit Cloud Deployment
+
+        1. Deploy your app to Streamlit Cloud
+        2. Go to app Settings → Secrets
+        3. Paste your secrets in TOML format
+        4. Click Save
+
+        ### Environment Variables (.env)
+
+        Alternatively, create a `.env` file:
+
+        ```bash
+        GEMINI_API_KEY=your-key-here
+        FAL_KEY=your-key-here
+        ```
+
+        **Note:** Never commit API keys to Git!
+        """)
 
 
 def render_new_project_page():
@@ -127,7 +484,21 @@ def render_new_project_page():
         input_label,
         height=300,
         help=input_help,
-        placeholder="Enter your content here..."
+        placeholder="Enter your content here...",
+        key="new_project_input"
+    )
+
+    # Execution mode selection
+    st.subheader("Execution Mode")
+    exec_mode = st.radio(
+        "Choose which phases to execute:",
+        [
+            "🎬 Full Pipeline (All 3 Phases)",
+            "📝 Phase 1: Script to Shot (Agents 1-4)",
+            "🎨 Phase 2: Image Generation (Agents 5-9)",
+            "🎥 Phase 3: Video Generation (Agent 10)"
+        ],
+        help="Select which phase(s) to run. Phase 2 requires Phase 1, Phase 3 requires Phase 2."
     )
 
     # Action buttons
@@ -137,32 +508,53 @@ def render_new_project_page():
         run_button = st.button(
             "🚀 Run Pipeline",
             type="primary",
-            disabled=not input_data or st.session_state.running,
-            width="stretch"
+            disabled=not input_data or SessionStateManager.is_running(),
+            use_container_width=True
         )
 
     if run_button and input_data:
         # Create new session
         try:
-            session = st.session_state.pipeline.create_session(
+            session = SessionStateManager.create_new_session(
                 input_data=input_data.strip(),
                 start_agent=start_agent,
                 session_name=session_name if session_name else None
             )
 
-            st.session_state.current_session = session
-            st.session_state.running = True
+            if not session:
+                st.error("Failed to create session")
+                return
+
+            SessionStateManager.set_running(True)
+
+            # Determine execution mode
+            if "Full Pipeline" in exec_mode:
+                phase = "full"
+            elif "Phase 1" in exec_mode:
+                phase = "phase_1"
+            elif "Phase 2" in exec_mode:
+                phase = "phase_2"
+            elif "Phase 3" in exec_mode:
+                phase = "phase_3"
+            else:
+                phase = "full"
 
             # Run pipeline
-            run_pipeline_with_progress(session)
+            run_pipeline_with_progress(session, phase=phase)
 
         except Exception as e:
             st.error(f"Failed to create session: {str(e)}")
-            st.session_state.running = False
+            SessionStateManager.set_running(False)
 
 
-def run_pipeline_with_progress(session: SessionState):
-    """Run pipeline with progress indicators."""
+def run_pipeline_with_progress(session: SessionState, phase: str = "full"):
+    """
+    Run pipeline with progress indicators.
+
+    Args:
+        session: Session state
+        phase: Phase to execute ("full", "phase_1", "phase_2", "phase_3")
+    """
     st.subheader("Pipeline Execution")
 
     # Progress container
@@ -181,28 +573,125 @@ def run_pipeline_with_progress(session: SessionState):
                 status_text.info(message)
 
         try:
-            # Run pipeline
-            updated_session = st.session_state.pipeline.run_pipeline(
-                session=session,
-                progress_callback=progress_callback
-            )
+            pipeline = SessionStateManager.get_pipeline()
 
-            st.session_state.current_session = updated_session
-            st.session_state.running = False
+            # Run selected phase
+            if phase == "phase_1":
+                updated_session = pipeline.run_phase_1(session, progress_callback)
+                success_msg = "✅ Phase 1 completed successfully!"
+            elif phase == "phase_2":
+                updated_session = pipeline.run_phase_2(session, progress_callback)
+                success_msg = "✅ Phase 2 completed successfully!"
+            elif phase == "phase_3":
+                updated_session = pipeline.run_phase_3(session, progress_callback)
+                success_msg = "✅ Phase 3 completed successfully!"
+            else:
+                # Full pipeline
+                updated_session = pipeline.run_pipeline(session, progress_callback)
+                success_msg = "✅ Full pipeline completed successfully!"
 
-            st.success("✅ Pipeline completed successfully!")
+            SessionStateManager.set_active_session(updated_session)
+            SessionStateManager.set_running(False)
+
+            st.success(success_msg)
 
             # Display results
             display_session_results(updated_session)
 
         except Exception as e:
-            st.error(f"Pipeline failed: {str(e)}")
-            st.session_state.running = False
+            st.error(f"Execution failed: {str(e)}")
+            SessionStateManager.set_running(False)
+
+            # Refresh session from disk to get partial results
+            SessionStateManager.refresh_active_session()
+            session = SessionStateManager.get_active_session()
 
             # Show partial results if available
-            if session.agents:
+            if session and session.agents:
                 st.warning("Showing partial results from completed agents:")
                 display_session_results(session)
+
+
+def render_retry_ui(session: SessionState, agent_name: str, agent_output):
+    """Render retry UI for failed agents."""
+    if agent_output.status in ["failed", "soft_failure"]:
+        with st.expander("🔄 Retry Agent"):
+            st.warning(f"**Status:** {agent_output.status}")
+            if agent_output.error_message:
+                st.error(f"**Error:** {agent_output.error_message}")
+
+            st.markdown("---")
+            st.markdown("**Edit input before retry (optional):**")
+
+            # Get original input
+            pipeline = SessionStateManager.get_pipeline()
+            try:
+                original_input = pipeline._get_agent_input(session, agent_name)
+                input_json = json.dumps(original_input, indent=2)
+            except:
+                input_json = "{}"
+
+            # Editable input
+            edited_input = st.text_area(
+                "Agent Input (JSON):",
+                value=input_json,
+                height=200,
+                key=f"retry_input_{agent_name}",
+                help="Modify the input data if needed, or leave as-is to retry with original input"
+            )
+
+            col1, col2 = st.columns([1, 3])
+            with col1:
+                retry_button = st.button(
+                    "🔄 Retry Agent",
+                    key=f"retry_btn_{agent_name}",
+                    type="primary",
+                    use_container_width=True
+                )
+
+            if retry_button:
+                try:
+                    # Parse edited input
+                    if edited_input.strip():
+                        modified_input = json.loads(edited_input)
+                    else:
+                        modified_input = None
+
+                    # Set running state
+                    SessionStateManager.set_running(True)
+
+                    # Progress UI
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
+
+                    def progress_callback(message, progress, error=False):
+                        progress_bar.progress(min(progress, 1.0))
+                        if error:
+                            status_text.error(message)
+                        else:
+                            status_text.info(message)
+
+                    # Retry agent
+                    updated_session = pipeline.retry_agent(
+                        session=session,
+                        agent_name=agent_name,
+                        modified_input=modified_input,
+                        progress_callback=progress_callback
+                    )
+
+                    # Update session
+                    SessionStateManager.set_active_session(updated_session)
+                    SessionStateManager.set_running(False)
+
+                    st.success(f"✅ {agent_name} retry completed successfully!")
+                    st.rerun()
+
+                except json.JSONDecodeError as e:
+                    st.error(f"Invalid JSON: {str(e)}")
+                    SessionStateManager.set_running(False)
+                except Exception as e:
+                    st.error(f"Retry failed: {str(e)}")
+                    SessionStateManager.set_running(False)
 
 
 def display_session_results(session: SessionState):
@@ -210,8 +699,8 @@ def display_session_results(session: SessionState):
     st.subheader("Results")
 
     # Get session directory for image paths (Phase 2)
-    session_manager = st.session_state.pipeline.session_manager
-    session_dir = Path(session_manager.base_directory) / session.session_id
+    pipeline = SessionStateManager.get_pipeline()
+    session_dir = Path(pipeline.session_manager.base_directory) / session.session_id
 
     # Create tabs for each agent (Phase 1 + Phase 2 + Phase 3)
     tabs = st.tabs([
@@ -252,6 +741,9 @@ def display_session_results(session: SessionState):
                 st.warning(f"Agent 1 status: {agent_output.status}")
                 if agent_output.error_message:
                     st.error(agent_output.error_message)
+
+                # Retry UI
+                render_retry_ui(session, "agent_1", agent_output)
         else:
             st.info("Agent 1 not executed (started from Agent 2)")
 
@@ -280,6 +772,9 @@ def display_session_results(session: SessionState):
                 st.warning(f"Agent 2 status: {agent_output.status}")
                 if agent_output.error_message:
                     st.error(agent_output.error_message)
+
+                # Retry UI
+                render_retry_ui(session, "agent_2", agent_output)
         else:
             st.info("Agent 2 not yet executed")
 
@@ -307,6 +802,9 @@ def display_session_results(session: SessionState):
                 st.warning(f"Agent 3 status: {agent_output.status}")
                 if agent_output.error_message:
                     st.error(agent_output.error_message)
+
+                # Retry UI
+                render_retry_ui(session, "agent_3", agent_output)
         else:
             st.info("Agent 3 not yet executed")
 
@@ -359,6 +857,9 @@ def display_session_results(session: SessionState):
                 st.warning(f"Agent 4 status: {agent_output.status}")
                 if agent_output.error_message:
                     st.error(agent_output.error_message)
+
+                # Retry UI
+                render_retry_ui(session, "agent_4", agent_output)
         else:
             st.info("Agent 4 not yet executed")
 
@@ -405,6 +906,9 @@ def display_session_results(session: SessionState):
                 st.warning(f"Agent 5 status: {agent_output.status}")
                 if agent_output.error_message:
                     st.error(agent_output.error_message)
+
+                # Retry UI
+                render_retry_ui(session, "agent_5", agent_output)
         else:
             st.info("Agent 5 not yet executed (Phase 2)")
 
@@ -428,9 +932,51 @@ def display_session_results(session: SessionState):
                     status_emoji = "✓" if status == "verified" else "⚠️"
 
                     with st.expander(f"{status_emoji} {shot_id} ({status})"):
-                        img_path = session_dir / parent.get("image_path", "")
-                        if img_path.exists():
-                            st.image(str(img_path), caption=shot_id, width="stretch")
+                        col1, col2 = st.columns([3, 1])
+
+                        with col1:
+                            img_path = session_dir / parent.get("image_path", "")
+                            if img_path.exists():
+                                st.image(str(img_path), caption=shot_id, use_container_width=True)
+
+                        with col2:
+                            # Video generation button
+                            if st.button(
+                                "🎬 Generate Video",
+                                key=f"gen_video_parent_{shot_id}",
+                                use_container_width=True,
+                                help="Generate video for this shot"
+                            ):
+                                try:
+                                    pipeline = SessionStateManager.get_pipeline()
+
+                                    with st.spinner(f"Generating video for {shot_id}..."):
+                                        progress_bar = st.progress(0)
+                                        status_text = st.empty()
+
+                                        def progress_callback(message, progress, error=False):
+                                            progress_bar.progress(min(progress, 1.0))
+                                            if error:
+                                                status_text.error(message)
+                                            else:
+                                                status_text.info(message)
+
+                                        video_data = pipeline.generate_single_shot_video(
+                                            session=session,
+                                            shot_id=shot_id,
+                                            shot_type="parent",
+                                            progress_callback=progress_callback
+                                        )
+
+                                        if video_data.get("status") != "failed":
+                                            st.success(f"✅ Video generated for {shot_id}!")
+                                            if video_data.get("video_url"):
+                                                st.video(video_data["video_url"])
+                                        else:
+                                            st.error(f"Failed: {video_data.get('error')}")
+
+                                except Exception as e:
+                                    st.error(f"Error: {str(e)}")
 
                         # Verification details
                         final_ver = parent.get("final_verification", {})
@@ -453,6 +999,9 @@ def display_session_results(session: SessionState):
                 )
             else:
                 st.warning(f"Agent 7 status: {agent_output.status}")
+
+                # Retry UI for Agent 7
+                render_retry_ui(session, "agent_7", agent_output)
         else:
             st.info("Agent 6/7 not yet executed (Phase 2)")
 
@@ -492,9 +1041,51 @@ def display_session_results(session: SessionState):
                     status_emoji = "✓" if status == "verified" else "⚠️"
 
                     with st.expander(f"{status_emoji} {shot_id} ({status})"):
-                        img_path = session_dir / child.get("image_path", "")
-                        if img_path.exists():
-                            st.image(str(img_path), caption=shot_id, width="stretch")
+                        col1, col2 = st.columns([3, 1])
+
+                        with col1:
+                            img_path = session_dir / child.get("image_path", "")
+                            if img_path.exists():
+                                st.image(str(img_path), caption=shot_id, use_container_width=True)
+
+                        with col2:
+                            # Video generation button
+                            if st.button(
+                                "🎬 Generate Video",
+                                key=f"gen_video_child_{shot_id}",
+                                use_container_width=True,
+                                help="Generate video for this shot"
+                            ):
+                                try:
+                                    pipeline = SessionStateManager.get_pipeline()
+
+                                    with st.spinner(f"Generating video for {shot_id}..."):
+                                        progress_bar = st.progress(0)
+                                        status_text = st.empty()
+
+                                        def progress_callback(message, progress, error=False):
+                                            progress_bar.progress(min(progress, 1.0))
+                                            if error:
+                                                status_text.error(message)
+                                            else:
+                                                status_text.info(message)
+
+                                        video_data = pipeline.generate_single_shot_video(
+                                            session=session,
+                                            shot_id=shot_id,
+                                            shot_type="child",
+                                            progress_callback=progress_callback
+                                        )
+
+                                        if video_data.get("status") != "failed":
+                                            st.success(f"✅ Video generated for {shot_id}!")
+                                            if video_data.get("video_url"):
+                                                st.video(video_data["video_url"])
+                                        else:
+                                            st.error(f"Failed: {video_data.get('error')}")
+
+                                except Exception as e:
+                                    st.error(f"Error: {str(e)}")
 
                 # Download
                 st.download_button(
@@ -505,6 +1096,9 @@ def display_session_results(session: SessionState):
                 )
             else:
                 st.warning(f"Agent 9 status: {agent_output.status}")
+
+                # Retry UI for Agent 9
+                render_retry_ui(session, "agent_9", agent_output)
         else:
             st.info("Agent 8/9 not yet executed (Phase 2)")
 
@@ -606,6 +1200,9 @@ def display_session_results(session: SessionState):
                 st.warning(f"Agent 10 status: {agent_output.status}")
                 if agent_output.error_message:
                     st.error(agent_output.error_message)
+
+                # Retry UI
+                render_retry_ui(session, "agent_10", agent_output)
         else:
             st.info("Agent 10 not yet executed (Phase 3)")
 
@@ -631,8 +1228,8 @@ def display_session_results(session: SessionState):
                 from core.export import generate_html_export
 
                 # Get session directory from pipeline's session manager
-                session_manager = st.session_state.pipeline.session_manager
-                session_dir = Path(session_manager.base_directory) / session.session_id
+                pipeline = SessionStateManager.get_pipeline()
+                session_dir = Path(pipeline.session_manager.base_directory) / session.session_id
 
                 # Generate HTML
                 with st.spinner("Generating HTML export with embedded images..."):
@@ -666,8 +1263,8 @@ def display_session_results(session: SessionState):
                 from core.export import generate_html_export_parts
 
                 # Get session directory from pipeline's session manager
-                session_manager = st.session_state.pipeline.session_manager
-                session_dir = Path(session_manager.base_directory) / session.session_id
+                pipeline = SessionStateManager.get_pipeline()
+                session_dir = Path(pipeline.session_manager.base_directory) / session.session_id
 
                 # Generate parts
                 with st.spinner("Generating HTML export with auto-splitting..."):
@@ -708,8 +1305,8 @@ def display_session_results(session: SessionState):
                 from core.export import generate_notion_export_zip
 
                 # Get session directory from pipeline's session manager
-                session_manager = st.session_state.pipeline.session_manager
-                session_dir = Path(session_manager.base_directory) / session.session_id
+                pipeline = SessionStateManager.get_pipeline()
+                session_dir = Path(pipeline.session_manager.base_directory) / session.session_id
 
                 # Generate Notion ZIP
                 with st.spinner("Generating Notion export ZIP..."):
@@ -742,8 +1339,8 @@ def display_session_results(session: SessionState):
                 from core.export import generate_complete_export_zip
 
                 # Get session directory from pipeline's session manager
-                session_manager = st.session_state.pipeline.session_manager
-                session_dir = Path(session_manager.base_directory) / session.session_id
+                pipeline = SessionStateManager.get_pipeline()
+                session_dir = Path(pipeline.session_manager.base_directory) / session.session_id
 
                 # Generate complete ZIP
                 with st.spinner("Generating complete export ZIP..."):
@@ -771,7 +1368,8 @@ def render_resume_session_page():
     st.header("Resume Session")
 
     # Load recent sessions
-    sessions = st.session_state.pipeline.list_sessions(limit=10)
+    pipeline = SessionStateManager.get_pipeline()
+    sessions = pipeline.list_sessions(limit=10)
 
     if not sessions:
         st.info("No sessions found. Create a new project to get started.")
@@ -792,7 +1390,7 @@ def render_resume_session_page():
         session_id = session_options[selected]
 
         # Load session
-        session = st.session_state.pipeline.get_session(session_id)
+        session = pipeline.get_session(session_id)
 
         if session:
             # Display session info
@@ -821,24 +1419,24 @@ def render_resume_session_page():
 
             if st.button("Resume Pipeline", type="primary"):
                 try:
-                    st.session_state.current_session = session
-                    st.session_state.running = True
+                    SessionStateManager.set_active_session(session)
+                    SessionStateManager.set_running(True)
 
                     # Resume pipeline
-                    updated_session = st.session_state.pipeline.resume_from_agent(
+                    updated_session = pipeline.resume_from_agent(
                         session=session,
                         agent_name=resume_from
                     )
 
-                    st.session_state.current_session = updated_session
-                    st.session_state.running = False
+                    SessionStateManager.set_active_session(updated_session)
+                    SessionStateManager.set_running(False)
 
                     st.success("Pipeline resumed and completed successfully!")
                     st.rerun()
 
                 except Exception as e:
                     st.error(f"Failed to resume pipeline: {str(e)}")
-                    st.session_state.running = False
+                    SessionStateManager.set_running(False)
 
 
 def render_session_history_page():
@@ -846,7 +1444,8 @@ def render_session_history_page():
     st.header("Session History")
 
     # Load all sessions
-    sessions = st.session_state.pipeline.list_sessions(limit=50)
+    pipeline = SessionStateManager.get_pipeline()
+    sessions = pipeline.list_sessions(limit=50)
 
     if not sessions:
         st.info("No sessions found.")
@@ -871,14 +1470,14 @@ def render_session_history_page():
 
             with col1:
                 if st.button(f"View Session", key=f"view_{session['session_id']}"):
-                    loaded_session = st.session_state.pipeline.get_session(session['session_id'])
+                    loaded_session = pipeline.get_session(session['session_id'])
                     if loaded_session:
-                        st.session_state.current_session = loaded_session
+                        SessionStateManager.set_active_session(loaded_session)
                         display_session_results(loaded_session)
 
             with col2:
                 if st.button(f"Delete Session", key=f"delete_{session['session_id']}", type="secondary"):
-                    if st.session_state.pipeline.delete_session(session['session_id']):
+                    if pipeline.delete_session(session['session_id']):
                         st.success("Session deleted")
                         st.rerun()
                     else:

@@ -64,6 +64,7 @@ htmlcov/
 
 # Streamlit
 .streamlit/
+.streamlit/secrets.toml  # Explicitly ignore local secrets
 
 # OS
 Thumbs.db

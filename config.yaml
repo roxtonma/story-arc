@@ -13,7 +13,7 @@ gemini:
   timeout: 300  # seconds
 
   # Authentication Mode
-  use_vertex_ai: true  # Set to true to use Vertex AI instead of direct API
+  use_vertex_ai: false  # Set to true to use Vertex AI instead of direct API
 
   # Vertex AI Configuration (only used when use_vertex_ai: true)
   vertex_ai:
