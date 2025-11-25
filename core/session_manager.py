@@ -312,7 +312,7 @@ class SessionManager:
             True if can resume, False otherwise
         """
         # Define agent order (Phase 1 + Phase 2 + Phase 3)
-        agent_order = ["agent_1", "agent_2", "agent_3", "agent_4", "agent_5", "agent_6", "agent_7", "agent_8", "agent_9", "agent_10"]
+        agent_order = ["agent_1", "agent_2", "agent_3", "agent_4", "agent_5", "agent_6", "agent_7", "agent_8", "agent_9", "agent_10", "agent_11"]
 
         # Can't resume from an agent before the start agent
         if agent_order.index(agent_name) < agent_order.index(session.start_agent):

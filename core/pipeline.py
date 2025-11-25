@@ -22,6 +22,8 @@ from agents.agent_7_parent_verification import ParentVerificationAgent
 from agents.agent_8_child_generator import ChildImageGeneratorAgent
 from agents.agent_9_child_verification import ChildVerificationAgent
 from agents.agent_10_video_dialogue import VideoDialogueAgent
+# Phase 3: Video Editing
+from agents.agent_11_video_edit import VideoEditAgent
 
 
 class Pipeline:
@@ -70,11 +72,11 @@ class Pipeline:
         # Agent execution order
         # Phase 1: Script to shot breakdown
         # Phase 2: Image generation (agents 5-9)
-        # Phase 3: Video generation (agent 10)
+        # Phase 3: Video generation & editing (agents 10-11)
         self.agent_order = [
             "agent_1", "agent_2", "agent_3", "agent_4",  # Phase 1
             "agent_5", "agent_6", "agent_7", "agent_8", "agent_9",  # Phase 2
-            "agent_10"  # Phase 3
+            "agent_10", "agent_11"  # Phase 3
         ]
 
         logger.info("Pipeline initialized successfully (Phase 1 + Phase 2 + Phase 3)")
@@ -132,19 +134,19 @@ class Pipeline:
 
     def _get_phase2_agent(self, agent_name: str, session: SessionState):
         """
-        Initialize Phase 2 agent on-demand with session directory.
+        Initialize Phase 2/3 agent on-demand with session directory.
 
         Args:
-            agent_name: Agent name (agent_5 through agent_9)
+            agent_name: Agent name (agent_5 through agent_11)
             session: Current session state
 
         Returns:
-            Initialized Phase 2 agent
+            Initialized Phase 2/3 agent
         """
         if agent_name not in self.agent_order:
             raise ValueError(f"Unknown agent: {agent_name}")
 
-        if agent_name not in ["agent_5", "agent_6", "agent_7", "agent_8", "agent_9", "agent_10"]:
+        if agent_name not in ["agent_5", "agent_6", "agent_7", "agent_8", "agent_9", "agent_10", "agent_11"]:
             raise ValueError(f"{agent_name} is not a Phase 2/3 agent")
 
         # Get session directory
@@ -190,6 +192,13 @@ class Pipeline:
             return VideoDialogueAgent(
                 self.gemini_client,
                 self.config["agents"]["agent_10"],
+                session_dir
+            )
+
+        elif agent_name == "agent_11" and self.config["agents"]["agent_11"]["enabled"]:
+            return VideoEditAgent(
+                self.gemini_client,
+                self.config["agents"]["agent_11"],
                 session_dir
             )
 
@@ -245,7 +254,7 @@ class Pipeline:
         max_retries = self.config["app"]["max_retries"]
 
         # Get agent (Phase 1 from cache, Phase 2/3 created on-demand)
-        if agent_name in ["agent_5", "agent_6", "agent_7", "agent_8", "agent_9", "agent_10"]:
+        if agent_name in ["agent_5", "agent_6", "agent_7", "agent_8", "agent_9", "agent_10", "agent_11"]:
             # Phase 2/3 agent - initialize with session directory
             agent = self._get_phase2_agent(agent_name, session)
         elif agent_name in self.agents:
@@ -799,6 +808,19 @@ class Pipeline:
                 "shot_breakdown": self._get_agent_output(session, "agent_3"),
                 "shot_grouping": self._get_agent_output(session, "agent_4"),
                 "character_data": self._get_agent_output(session, "agent_5")  # Full agent_5 output with characters list
+            }
+
+        elif agent_name == "agent_11":
+            # Intelligent Video Editor needs videos from Agent 10 plus scene/shot context
+            return {
+                "videos": self._get_agent_output(session, "agent_10").get("videos", []),
+                "scene_breakdown": self._get_agent_output(session, "agent_2"),
+                "shot_breakdown": self._get_agent_output(session, "agent_3"),
+                "shot_grouping": self._get_agent_output(session, "agent_4"),
+                "session_metadata": {
+                    "session_id": session.session_id,
+                    "session_name": session.session_name
+                }
             }
 
         # Phase 1 agents: Get output from previous agent

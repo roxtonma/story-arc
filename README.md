@@ -2,7 +2,7 @@
 
 **AI-Powered Multi-Agent Pipeline for Script-to-Shot-to-Image Conversion**
 
-Story Architect is a production-ready system that transforms story concepts into fully generated cinematic images. Powered by Google Gemini 2.5 Pro and Gemini 2.5 Flash Image, it uses a specialized nine-agent pipeline to generate screenplays, break them into shots, and produce consistent character-driven images ready for AI video generation.
+Story Architect is a production-ready system that transforms story concepts into fully generated cinematic videos. Powered by Google Gemini models, it uses a specialized 11-agent pipeline to generate screenplays, break them into shots, produce consistent character-driven images, generate videos, and intelligently edit them into a final cinematic product.
 
 ## Features
 
@@ -12,12 +12,20 @@ Story Architect is a production-ready system that transforms story concepts into
 - **Shot Planning**: Detailed shot descriptions with first-frame and animation prompts
 - **Shot Grouping**: Parent/child relationships for optimized generation
 
-### Phase 2: Image Generation & Verification (NEW)
+### Phase 2: Image Generation & Verification
 - **Character Creation**: Generate consistent 1024x1024 character portraits with grid layouts
 - **Parent Shot Images**: Transform character grids into cinematic parent shots
 - **Child Shot Images**: Generate consistent child shots using parent references
 - **AI Verification**: Automated quality assessment with retry logic
 - **Multi-Format Export**: HTML (single/multi-part), Notion ZIP, complete archives
+
+### Phase 3: Video Generation & Intelligent Editing (NEW)
+- **Video Generation**: Transform static images into 4-8 second video clips with dialogue
+- **Audio Analysis**: WhisperX-powered word-level timestamp detection
+- **Intelligent Editing**: AI-driven Edit Decision Lists (EDL) using Gemini 2.5 Flash
+- **Cinematic Transitions**: J-cuts and L-cuts for natural conversation flow
+- **Scene Assembly**: Automated concatenation with crossfade transitions
+- **Master Timeline**: Final edited video ready for distribution
 
 ### Core Features
 - **Flexible Entry Points**: Start from a logline or bring your own screenplay
@@ -29,7 +37,7 @@ Story Architect is a production-ready system that transforms story concepts into
 
 ## Architecture
 
-### Nine-Agent Pipeline
+### 11-Agent Pipeline
 
 **Phase 1: Script-to-Shot (Agents 1-4)**
 
@@ -92,12 +100,36 @@ Story Architect is a production-ready system that transforms story concepts into
 - Features: Cross-references parent shots for continuity
 - Model: Gemini 2.5 Pro vision analysis
 
+**Phase 3: Video Generation & Editing (Agents 10-11)**
+
+**Agent 10: Video Dialogue Generator**
+- Input: Parent and child shot images + scene/shot metadata
+- Output: 4-8 second video clips with dialogue and animation
+- Features: Converts static images to video using Veo 3.1 or FAL AI
+- Model: Google Veo 3.1 Fast Generate (Vertex AI) or FAL AI video models
+- Storage: Videos saved to session directory with metadata
+
+**Agent 11: Intelligent Video Editor**
+- Input: Generated videos + scene/shot structure
+- Output: Master video timeline + per-scene videos
+- Features:
+  - WhisperX audio analysis for word-level timestamps
+  - Gemini 2.5 Flash generates Edit Decision Lists (EDL)
+  - FFmpeg-powered editing with J/L cuts
+  - Automated silence trimming and pacing optimization
+  - Scene-to-scene crossfade transitions
+- Model: Gemini 2.5 Flash (EDL generation) + WhisperX (audio analysis)
+- Tools: FFmpeg, WhisperX
+
 ### Tech Stack
 
 - Python 3.10+
 - Google Gemini 2.5 Pro (text generation, vision analysis)
-- Google Gemini 2.5 Flash Image (image generation)
+- Google Gemini 2.5 Flash (EDL generation, image generation)
+- Google Veo 3.1 (video generation)
 - Streamlit (GUI)
+- FFmpeg (video editing and processing)
+- WhisperX (audio analysis and speech recognition)
 - Pillow (image manipulation)
 - Pydantic (validation)
 - YAML configuration + environment variables
@@ -107,8 +139,13 @@ Story Architect is a production-ready system that transforms story concepts into
 ### Prerequisites
 
 - Python 3.10 or higher
+- **FFmpeg**: Required for video editing (Agent 11)
+  - **Windows**: Download from [ffmpeg.org](https://ffmpeg.org/download.html) or install via [Chocolatey](https://chocolatey.org/): `choco install ffmpeg`
+  - **macOS**: `brew install ffmpeg`
+  - **Linux (Ubuntu/Debian)**: `sudo apt-get install ffmpeg`
+  - Verify installation: `ffmpeg -version`
 - Google Gemini API key (get one at https://aistudio.google.com/apikey)
-- Optional: Google Cloud project with Vertex AI enabled (for enterprise deployments)
+- Optional: Google Cloud project with Vertex AI enabled (for enterprise deployments, Agent 10 video generation)
 
 ### Setup
 
